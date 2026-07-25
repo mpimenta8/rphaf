@@ -20,6 +20,11 @@ Working notes for humans (and agents) collaborating on this fork. This is a
   `git remote set-url origin git@github.com:mpimenta8/rphaf.git`,
   `git remote add upstream https://github.com/block/buzz.git`,
   `git remote set-url --push upstream DISABLED`.
+- **A fresh clone also needs the README merge driver:** `git config merge.ours.driver true`.
+  `.gitattributes` marks `README.md merge=ours` so upstream merges keep our rewritten README,
+  but the driver config lives in `.git/config` and isn't cloned. Without it, merges that touch
+  the README conflict instead — noisy, not dangerous. Note the driver discards upstream README
+  changes *silently*; `git diff HEAD upstream/main -- README.md` shows what we're skipping.
 - **Keep upstream merges clean:** prefer changes that don't rewrite shared server/Rust files.
 
 ### Pushing (SSH — now actually configured)
