@@ -186,6 +186,13 @@ value warrants it — it's a one-line `DATABASE_URL` swap, not a rebuild.
   hurts *media upload/download* specifically (chat send/receive is imperceptible). 4 GB is ~3x the
   estimated ~1.2 GB steady state for "just chat"; DO's CPU/RAM resize is reversible, so starting
   small is low-risk.
+- **The droplet exists (2026-07-25):** `rphaf-ubuntu-nyc3`, Ubuntu 24.04, region **NYC3**.
+  IPv4 **68.183.145.188** (SSH confirmed open), IPv6 `2604:a880:800:14:0:3:48dc:4000` (deliberately
+  **not** in DNS yet — see the AAAA note above). Created with no DO cloud firewall and no startup
+  script: `ufw` is configured by hand in `PROVISIONING.md` §3, and automating §2 would skip the
+  "confirm the new user's SSH works *before* disabling root" check that prevents lockout.
+  **Blocked on:** the `jean.rphaf.io` A record, which needs the domain owner (AWS admin access
+  pending).
 - **Hetzner is no longer the pick.** Their **15 June 2026** increase raised CPX/CCX ~2.4–3x: CPX31 is
   now ~$74/mo in the US (dead) and ~$42 in Nuremberg. US locations only offer CPX/CCX, so there's no
   cheap Hetzner-US option at all. The surviving value play is **CAX21 (Arm, 4 vCPU / 8 GB, ~$12/mo)**
@@ -279,6 +286,39 @@ backup** — do the restore drill once (see `PROVISIONING.md` §7).
 ### Managed-Postgres later (the escape hatch)
 Point `DATABASE_URL` at a managed DB and delete the `postgres` service + its `depends_on` in
 `compose.yml`. The relay VM becomes stateless/disposable; backups + PITR become the provider's job.
+
+## Getting the app to friends (builds + signing)
+
+**We must build and distribute the desktop app ourselves.** `just release-desktop` tags a version
+that triggers `release.yml` **in `block/buzz`**, which signs and notarizes with *Block's* Apple
+credentials (`RELEASING.md`). A fork has no access to those secrets, so that path is closed. Our
+build is `cd desktop && pnpm tauri build`.
+
+You do **not** need any of this to test the relay yourself — `just dev` runs a local build with your
+identity. Signing only matters when handing a installer to someone else.
+
+| Platform | Free? | Friend's experience |
+|---|---|---|
+| Linux | ✅ clean | AppImage/`.deb` just runs |
+| Android | ✅ clean | Self-signed APK; enable "install unknown apps" once. No Play Store needed |
+| Windows | ⚠️ free w/ friction | SmartScreen → *More info* → *Run anyway* (real certs are ~$300–500/yr) |
+| macOS | ⚠️ free w/ friction | Blocked on first launch → **System Settings → Privacy & Security → "Open Anyway"**, or `xattr -dr com.apple.quarantine`. The old Control-click→Open bypass no longer works on recent macOS |
+| **iOS** | ❌ **no free path** | Free Apple ID sideloading expires every **7 days**; TestFlight and ad-hoc both require the paid program |
+
+- **iPhone is the only hard paywall.** If anyone in the group has one, the **$99/yr Apple Developer
+  Program** is effectively mandatory — and **one membership covers both** Apple platforms: Developer
+  ID notarization kills the macOS warning *and* TestFlight handles iPhones (100 internal testers, no
+  review, 90-day builds). It's the only item in the project with an external queue, so enroll early
+  if it's needed at all.
+- **The mobile app has NO feature gating** — verified: zero feature-flag references anywhere in
+  `mobile/lib`. The whole "just chat" strip-down is desktop-only (`preview-features.json` +
+  `<FeatureGate>` under `desktop/src`). Shipping the Flutter app as-is would expose the **full** Buzz
+  surface (agents, huddles, workflows, projects) on phones while desktop hides it — mismatched UX for
+  exactly the non-technical audience this is for. Reaching parity means porting the gating pass to
+  Flutter: real work, not config.
+- **Therefore: desktop-first.** Relay live → everyone on the desktop build → treat mobile as a
+  deliberate phase two. This also defers the $99 question, since nothing about the relay or the
+  desktop rollout depends on it.
 
 ## Key references
 
