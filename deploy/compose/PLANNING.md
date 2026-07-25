@@ -75,25 +75,51 @@ account.** That one sentence is the entire UX tax of self-sovereign identity —
 ## Part 2 — Host options
 
 ### What the relay actually needs
-- **RAM:** 4 GB works; **8 GB is comfortable** (relay + Postgres + Redis + MinIO + Caddy, with room
-  to re-enable agents/voice later). 2 GB is tight — avoid unless you're only kicking tires.
+- **RAM:** **4 GB is plenty for "just chat"** — estimated steady state is ~1.2 GB (Ubuntu ~400 MB,
+  Postgres ~300 MB, MinIO ~250 MB, relay ~150 MB, Redis ~80 MB, Caddy ~30 MB). **8 GB** only buys
+  headroom to re-enable agents/voice later. 2 GB is tight — avoid unless you're only kicking tires.
+  On a 4 GB box, add swap (see `PROVISIONING.md`).
 - **CPU/disk:** 2 vCPU, 40–80 GB NVMe to start (Postgres + MinIO media grow; add block storage later).
 - **Network:** inbound **80/443** open, ability to run Docker, a region near you + friends.
 - **Bandwidth:** chat traffic is trivial; **media (images/video via MinIO) is the variable** — check
   the egress allowance if you'll share lots of media.
 
+### ⚠️ Hetzner raised prices on 15 June 2026 — this section was rewritten
+
+The original version of this doc recommended Hetzner CPX31 at ~$16/mo. **That price no longer
+exists.** Hetzner's June 2026 adjustment raised the CPX and CCX lines by roughly 2.4x–3x, citing
+hardware procurement costs. The CX and CAX lines rose only ~1.3–1.4x, so the cheap tier moved rather
+than vanished — but it moved to **Arm, EU-only**.
+
+Verified in the Hetzner console, July 2026:
+
+| Hetzner plan | Specs | ~$/mo | Verdict |
+|---|---|---|---|
+| CPX31 — Ashburn / Hillsboro (US) | 4 / 8 GB / 160 GB | **~$74** | Dead. 2.98x increase. |
+| CPX31 — Nuremberg (EU) | 4 / 8 GB / 160 GB | ~$42 | Poor value now. |
+| **CAX21 — Nuremberg / Falkenstein / Helsinki** | 4 / 8 GB / 80 GB | **~$12** | Cheapest option — but **EU-only**. |
+
+**US locations only offer CPX/CCX**, which are exactly the lines that took the big hit. So "Hetzner
+in the US" is no longer a value play at all.
+
 ### The matrix
-Prices are **approximate (early 2026, USD/mo)** — verify current rates. "Managed PG in-house" = the
-host offers its own managed Postgres for the future escape hatch (but see the note below — you're not
-locked to it).
+Prices are **approximate (July 2026, USD/mo)** — verify current rates, and re-verify Hetzner's
+specifically, since they've proven volatile. "Managed PG in-house" = the host offers its own managed
+Postgres for the future escape hatch (but see the note below — you're not locked to it).
 
 | Host | Plan (vCPU / RAM / disk) | ~$/mo | Egress | Managed PG? | Best for |
 |---|---|---|---|---|---|
-| **Hetzner Cloud** | CPX31 (4 / 8 GB / 160 GB) | **~$16** | 20 TB | ✗ | Best value & headroom; EU + US regions |
-| **DigitalOcean** | Basic (2 / 4 GB / 80 GB) | ~$24 | 4 TB | ✓ | Best docs/DX; smooth managed-PG path |
+| **DigitalOcean** | Basic (2 / 4 GB / 80 GB) | **~$24** | 4 TB | ✓ | **US-based groups.** Best docs/DX; reversible resize |
+| **Hetzner CAX21** (Arm) | (4 / 8 GB / 80 GB) | **~$12** | 20 TB | ✗ | **EU-based groups.** Cheapest, most RAM — EU-only |
 | **Vultr** | Regular (2 / 4 GB / 80 GB) | ~$24 | 3–4 TB | ✓ | Many regions; hourly billing |
 | **Linode / Akamai** | Shared (2 / 4 GB / 80 GB) | ~$24 | 4 TB | ✓ | Solid, well-documented |
 | **AWS Lightsail** | (2 / 4 GB / 80 GB) | ~$24 | generous | ✓ (RDS) | On-ramp if you want AWS later |
+| ~~Hetzner CPX31 (US)~~ | (4 / 8 GB / 160 GB) | ~~~$74~~ | 1 TB | ✗ | Was the recommendation; no longer competitive |
+
+**Arm is a non-issue technically.** Every image in the stack is multi-arch (`arm64` + `amd64`):
+`ghcr.io/block/buzz:main` (verified against the GHCR manifest), `postgres:17-alpine`,
+`redis:7-alpine`, `minio/minio`, `caddy:2-alpine`. Running CAX21 needs **no changes to
+`compose.yml`**. The only real cost of CAX21 is geography.
 
 **Wildcards (not recommended for a shared relay, but worth knowing):**
 - **Oracle Cloud "Always Free"** — Ampere A1 up to 4 OCPU / 24 GB for **$0**. Tempting, but A1
@@ -102,25 +128,41 @@ locked to it).
 - **Home mini-PC / Raspberry Pi + Cloudflare Tunnel** — ~$0/mo + electricity, maximum learning. But
   home uptime, residential IP, and exposing your LAN are real downsides for something friends rely on.
 
-### Recommendation: **Hetzner CPX31 (8 GB) — ~$16/mo**
+### Recommendation: **DigitalOcean 4 GB (~$24/mo), US region**
+
+Since we and our friends are all US-based, this is now the pick.
 
 Rationale:
-- **Fits your budget with the most headroom.** At ~$16 it lands inside your $15–20 range while giving
-  **8 GB** — twice the RAM of the $24 competitors' 4 GB tiers. That headroom means MinIO + Postgres
-  never fight for memory, and you can flip agents/voice back on later without re-sizing.
-- **Bandwidth won't bite you.** 20 TB egress dwarfs the 4 TB competitors — media sharing stays free
-  of overage anxiety.
-- **Best price/performance, full stop** — the standard pick for value self-hosting.
+- **Latency goes where the users are.** An EU relay adds ~90–120ms round-trip. That's invisible for
+  sending/receiving chat, adds ~half a second to initial connect, but is genuinely noticeable on
+  **media upload/download** — the one interaction where it would bug people daily.
+- **4 GB is enough for "just chat."** The 8 GB figure below was sized for *re-enabling agents and
+  voice*, not for the first cut. Estimated steady state for a small group is **~1.2 GB total**
+  (Ubuntu ~400 MB, Postgres ~300 MB, MinIO ~250 MB, relay ~150 MB, Redis ~80 MB, Caddy ~30 MB) —
+  roughly 3x headroom. Confirm with `docker stats` once you're live.
+- **The resize is reversible.** DO's CPU/RAM resize goes both directions (only *disk* growth is
+  one-way), so outgrowing 4 GB is a temporary bump, not a migration. This de-risks starting small in
+  a way that picking the wrong Hetzner *region* does not.
+- **Best first-time-self-hoster DX** — best-in-class tutorials, polished console, snapshots, and
+  same-VPC managed Postgres when you graduate off all-in-one.
 
 Trade-offs to accept:
-- **Plainer console** and **no in-house managed Postgres.** The DX is a notch below DigitalOcean's,
-  and account verification can be stricter on signup.
-- Mitigated by the note below — the managed-PG gap doesn't actually lock you in.
+- **Half the RAM and $12/mo more** than Hetzner CAX21. You're paying for US latency; that's the
+  whole trade.
+- **4 TB egress** vs Hetzner's 20 TB. Fine unless media sharing gets heavy — watch it if that changes.
 
-### Runner-up: **DigitalOcean 4 GB (~$24, split-friendly)**
-If you want the **smoothest first-time-self-hoster experience** — best-in-class tutorials, a polished
-console, snapshots, and same-VPC managed Postgres when you graduate off all-in-one — DO is worth the
-few extra dollars, especially if friends chip in. You'd start on 4 GB (fine) and can resize up.
+Because RAM is the tighter constraint here, do both of these (see `PROVISIONING.md`):
+- **Add 2 GB of swap** — these VMs ship with none, and swap converts a would-be OOM-kill into a brief
+  slowdown.
+- **Cap Redis with `maxmemory`** — `compose.yml` starts Redis with no cap. Buzz only uses it for
+  ephemeral pub/sub, presence, and typing indicators, so unbounded growth is unlikely rather than
+  impossible — but the cap is free.
+
+### Runner-up: **Hetzner CAX21 (Arm, 8 GB) — ~$12/mo, EU-only**
+Half the price *and* double the RAM of the DO box, with 20 TB egress. If the group were EU-based this
+would be the obvious pick with no trade-off at all. Also the right answer if you later decide the
+media latency doesn't bother anyone and you'd rather have the headroom for agents/voice. Requires no
+`compose.yml` changes — the stack is fully arm64.
 
 ### The managed-Postgres escape hatch is host-independent
 Don't over-weight "does my VM host offer managed PG." Moving to managed Postgres later is a one-line
@@ -129,8 +171,11 @@ managed PG — regardless of where the VM lives. So Hetzner's lack of in-house m
 con: you can still adopt a managed database later from a specialist host.
 
 ### Bottom line
-- **Default pick:** Hetzner CPX31 (8 GB, ~$16) — best value, in budget, room to grow.
-- **Pick DO instead if** you value maximum hand-holding/docs over price and are OK ~$24 (split it).
+- **Default pick:** DigitalOcean 4 GB (~$24) in a **US** region — latency where the users are, and
+  4 GB is ~3x what "just chat" actually needs. Add swap + a Redis cap.
+- **Pick Hetzner CAX21 instead if** the group is EU-based, or if $12/mo and 8 GB matter more than
+  media-upload responsiveness. Arm is a non-issue — the whole stack is multi-arch.
+- **Don't pick Hetzner in the US** — the June 2026 increase put CPX31 at ~$74/mo there.
 - **Either way:** start all-in-one, add the nightly `pg_dump` backup on day one, and treat the
   managed-PG move as a later, host-independent option.
 

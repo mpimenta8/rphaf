@@ -3,22 +3,84 @@
 Provider-agnostic steps to stand up the rphaf/Buzz relay on a fresh **Ubuntu 24.04 LTS** VM,
 harden it, install Docker, open the firewall, deploy, and wire nightly offsite backups.
 
-Assumes the recommendation from `PLANNING.md`: a ~8 GB VM (e.g. Hetzner CPX31), a domain, and that
-you've settled your **owner key** (see `PLANNING.md` Part 1). Commands are copy-paste; run them in
-order. `sudo`-prefixed commands need root.
+Assumes the recommendation from `PLANNING.md`: a ~8 GB VM (e.g. Hetzner CPX31), the `rphaf.io`
+domain, and that you've settled your **owner key** (see `PLANNING.md` Part 1). Commands are
+copy-paste; run them in order. `sudo`-prefixed commands need root.
+
+> **One exception to "in order":** §0 (DNS) needs the VM's IP from §1, and depends on the domain
+> owner. Read §0 first, create the VM (§1), then fire off the DNS request and keep working through
+> §2–§4 while it propagates.
 
 ---
 
-## 0. Before the VM: DNS
+## 0. DNS — coordinate with the domain owner
 
-Create a **DNS A record** for your relay host pointing at the VM's public IP:
+`rphaf.io` is registered by a friend, so this is a **hand-off, not a solo step**. Budget for a
+round-trip: it's the one part of the process that depends on someone else being awake.
 
+### Sequencing (read before you ping anyone)
+The record needs the VM's public IP, which doesn't exist until §1 — but DNS is also the slowest link
+in the chain, and Caddy can't issue a TLS cert until the name resolves. So:
+
+1. **Create the VM first** (§1), grab its IP.
+2. **Then** send the request below.
+3. Continue with §2–§4 (hardening, firewall, Docker) **while DNS propagates** — none of it needs DNS.
+4. Only §5 (deploy) actually blocks on the record being live.
+
+### Pick the hostname
+`chat.rphaf.io` is the assumed name throughout this guide. If you choose differently, substitute it
+everywhere below — it also lands in `.env` via `gen-env.sh --domain`, and changing it later means
+re-issuing certs and re-pointing every client.
+
+### What to ask for
+Two options — pick one and be explicit about which, since they're very different asks:
+
+| Option | What the owner does | Best when |
+|---|---|---|
+| **A. Single A record** (recommended) | Adds one record for `chat.rphaf.io`. Nothing else changes. | You need one hostname and don't expect churn. |
+| **B. NS delegation** | Delegates all of `chat.rphaf.io` (or a `relay.` subtree) to a nameserver you control. | You want to self-serve future records without asking again. |
+
+Start with **A**. It's a two-minute change on their side and doesn't hand you control of anything
+they'd have to trust you with. Move to B only if you find yourself asking repeatedly.
+
+### Message to send
+
+> Can you add a DNS record on `rphaf.io`?
+>
+> ```
+> Type:  A
+> Name:  chat            (i.e. chat.rphaf.io)
+> Value: <VM_PUBLIC_IP>
+> TTL:   300
+> Proxy: OFF / "DNS only" — important, see below
+> ```
+>
+> Low TTL (300s) on purpose so we can fix mistakes fast; we can raise it once it's stable.
+
+### Cloudflare caveat (the one that will actually bite)
+If `rphaf.io` sits behind Cloudflare, the record **must be "DNS only" (grey cloud), not proxied
+(orange cloud)**. A proxied record breaks this stack two ways:
+
+- Caddy's Let's Encrypt **HTTP-01 challenge** fails, because Cloudflare terminates :80/:443 itself —
+  so the relay never gets a certificate.
+- Cloudflare's default proxy timeouts sever **long-lived WebSocket** connections, which is the
+  relay's entire transport (`wss://`).
+
+Say "grey cloud / DNS only" explicitly in the request. It's the single most common way this step
+silently half-works.
+
+### Verify before you deploy
+From your laptop, once they confirm:
+
+```bash
+dig +short chat.rphaf.io            # must print the VM's IP, nothing else
+dig +short chat.rphaf.io @1.1.1.1   # check a public resolver too, not just your ISP cache
 ```
-chat.yourdomain.com.   A   <VM_PUBLIC_IP>
-```
 
-Do this first — DNS takes a few minutes to propagate, and Caddy needs it resolving before it can get
-a TLS certificate.
+If the first returns nothing, it hasn't propagated yet — wait, don't retry the deploy. If it returns
+a *different* IP, the record points somewhere else (an old host, or a Cloudflare proxy IP if the grey
+cloud didn't get set). Resolve that before §5; Caddy will burn Let's Encrypt rate limits retrying
+against a name that doesn't point at it.
 
 ## 1. Create the VM
 
@@ -33,6 +95,9 @@ SSH in:
 ```bash
 ssh root@<VM_PUBLIC_IP>
 ```
+
+> **Now send the DNS request from §0** with this IP, before continuing. Propagation runs in the
+> background while you do §2–§4.
 
 ## 2. Baseline hardening
 
@@ -81,6 +146,25 @@ sudo ufw status verbose
 > Don't expose 3000/5432/6379/9000 publicly — with `BUZZ_COMPOSE_TLS=true`, only Caddy (80/443) is
 > published; Postgres/Redis/MinIO stay on the internal Docker network.
 
+## 3b. Add swap (do this on a 4 GB box)
+
+Cloud VMs ship with **no swap**. Without it, a momentary memory spike gets a process OOM-killed —
+usually Postgres, the one you least want killed. 2 GB of swap turns that into a brief slowdown.
+
+```bash
+sudo fallocate -l 2G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab   # survive reboot
+sudo sysctl -w vm.swappiness=10                              # prefer RAM; swap is a safety net
+echo 'vm.swappiness=10' | sudo tee /etc/sysctl.d/99-swappiness.conf
+free -h                                                      # confirm Swap: 2.0Gi
+```
+
+> Skip only if you provisioned 8 GB **and** are staying on "just chat". Swap is cheap insurance
+> either way.
+
 ## 4. Install Docker Engine + Compose plugin
 
 ```bash
@@ -97,12 +181,12 @@ sudo mkdir -p /opt && sudo chown "$USER" /opt
 git clone git@github.com:mpimenta8/rphaf.git /opt/rphaf   # or https://… if no deploy key
 cd /opt/rphaf/deploy/compose
 
-./gen-env.sh --domain chat.yourdomain.com --owner <your-64-hex-pubkey>
+./gen-env.sh --domain chat.rphaf.io --owner <your-64-hex-pubkey>
 grep -q CHANGE_ME .env && { echo "fill remaining CHANGE_ME first"; grep -n CHANGE_ME .env; }
 
 BUZZ_COMPOSE_TLS=true ./run.sh start
 ./run.sh status
-curl -fsS https://chat.yourdomain.com/_liveness && echo " <- relay is up"
+curl -fsS https://chat.rphaf.io/_liveness && echo " <- relay is up"
 ```
 
 Add yourself + friends (see `PLANNING.md` Part 1 for the owner-key rule):
@@ -112,7 +196,21 @@ Add yourself + friends (see `PLANNING.md` Part 1 for the owner-key rule):
 ./run.sh add-member <friend-npub>          # sleep 1 between multiple adds
 ```
 
-Friends point the desktop app at `wss://chat.yourdomain.com`.
+Friends point the desktop app at `wss://chat.rphaf.io`.
+
+### Optional: cap Redis on a 4 GB box
+`compose.yml` starts Redis with no `maxmemory`, so nothing bounds its growth. In practice Buzz only
+puts **expiring** keys there — presence (`presence.rs`), rate-limit counters (`rate_limiter.rs`), and
+NIP-98 replay guards all set TTLs — so runaway growth is unlikely. If you want the belt-and-braces
+version anyway, append to the `redis` service `command:`:
+
+```yaml
+"--maxmemory", "256mb", "--maxmemory-policy", "volatile-lru"
+```
+
+`volatile-lru` only evicts keys that already carry a TTL, so it can't discard anything meant to
+persist. Watch it first with `docker compose exec redis redis-cli -a "$REDIS_PASSWORD" info memory`
+before deciding you need it.
 
 ## 6. Nightly offsite backups (day one)
 
