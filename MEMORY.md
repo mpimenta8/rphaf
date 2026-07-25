@@ -15,6 +15,11 @@ Working notes for humans (and agents) collaborating on this fork. This is a
   collaborators). **Uses SSH**, on purpose — see "Pushing" below.
 - `upstream` → `github.com/block/buzz` (**fetch-only**, push disabled). Pull Block's updates with
   `git fetch upstream && git merge upstream/main`.
+- **Both drift and need re-establishing after a fresh clone** (seen 2026-07-25: `origin` had reverted
+  to HTTPS and `upstream` was missing entirely, which silently breaks the sync recipe above). Repair:
+  `git remote set-url origin git@github.com:mpimenta8/rphaf.git`,
+  `git remote add upstream https://github.com/block/buzz.git`,
+  `git remote set-url --push upstream DISABLED`.
 - **Keep upstream merges clean:** prefer changes that don't rewrite shared server/Rust files.
 
 ### Pushing (use SSH, not HTTPS)
@@ -107,10 +112,32 @@ To **re-enable agents later:** flip the Experiments toggles ON, then run the age
 
 ## Self-hosting the relay
 
-**Vision: start all-in-one, add automated backups on day one.** One small VM ($6–12/mo, 2GB RAM is
-plenty for a friend group) runs the whole stack via Docker Compose; a nightly `pg_dump` offsite
-closes the only scary failure mode (losing the DB) for ~$0. Move Postgres to a managed DB *later*
-only if the data's value warrants it — it's a one-line `DATABASE_URL` swap, not a rebuild.
+**Vision: start all-in-one, add automated backups on day one.** One small VM (~$24/mo, see host
+decision below) runs the whole stack via Docker Compose; a nightly `pg_dump` offsite closes the only
+scary failure mode (losing the DB) for ~$0. Move Postgres to a managed DB *later* only if the data's
+value warrants it — it's a one-line `DATABASE_URL` swap, not a rebuild.
+
+### Settled decisions (2026-07-25)
+- **Owner identity:** `6a68bbc04fad286751cb73a699ca9428dfe038399e60653428a0864f19c05b2f`
+  (`npub1df5thsz0455xw5wtwwnfnj559r07qwpenesx2dpg5zry7xwqtvhsks7c9c`). Derived from the backed-up
+  `nsec` and cross-checked against the Nostr client. This is `RELAY_OWNER_PUBKEY`.
+- **Domain:** `rphaf.io`, registered by a friend — **DNS changes require a hand-off**, they're not
+  self-serve. Relay hostname is `chat.rphaf.io`. Keep the A-record TTL at 300 so future re-points
+  (e.g. moving hosts) are fast.
+- **Host: DigitalOcean 4 GB (~$24/mo), US region.** Everyone is US-based, and EU hosting's ~90–120ms
+  hurts *media upload/download* specifically (chat send/receive is imperceptible). 4 GB is ~3x the
+  estimated ~1.2 GB steady state for "just chat"; DO's CPU/RAM resize is reversible, so starting
+  small is low-risk.
+- **Hetzner is no longer the pick.** Their **15 June 2026** increase raised CPX/CCX ~2.4–3x: CPX31 is
+  now ~$74/mo in the US (dead) and ~$42 in Nuremberg. US locations only offer CPX/CCX, so there's no
+  cheap Hetzner-US option at all. The surviving value play is **CAX21 (Arm, 4 vCPU / 8 GB, ~$12/mo)**
+  — but it's **EU-only** (Nuremberg/Falkenstein/Helsinki). Reconsider it if the group ever goes EU.
+- **The stack is fully multi-arch**, so Arm hosts need *no* `compose.yml` changes: `block/buzz:main`
+  publishes `amd64`+`arm64` (verified against the GHCR manifest), as do `postgres:17-alpine`,
+  `redis:7-alpine`, `minio`, `caddy:2-alpine`.
+- **On a 4 GB box: add 2 GB swap** (cloud VMs ship with none; see `PROVISIONING.md` §3b). Optionally
+  cap Redis — it's started with no `maxmemory`, though Buzz only stores *expiring* keys there
+  (presence, rate limits, NIP-98 replay), so `volatile-lru` is the safe policy if you bother.
 
 ### The tooling already exists — `deploy/compose/`
 - `compose.yml` (`name: buzz-prod`) — **relay** (`ghcr.io/block/buzz:main`) + **postgres:17** +
@@ -135,6 +162,12 @@ only if the data's value warrants it — it's a one-line `DATABASE_URL` swap, no
   `BUZZ_REQUIRE_RELAY_MEMBERSHIP=true` and needs `RELAY_OWNER_PUBKEY` = your 64-hex Nostr pubkey
   (the desktop identity pubkey). Friends join via `./run.sh add-member <npub-or-hex>` (add `sleep 1`
   between multiple adds; no parallel adds — same-second timestamp collisions in the roster event).
+- **Importing an existing `nsec` on desktop is only reachable via the "membership denied" screen**
+  (`importExistingKey` is wired solely to `MembershipDenied`, see `OnboardingFlow.tsx:437`). Normal
+  onboarding always mints a *fresh* key. So the real first-connect flow to a closed relay is:
+  app generates key B → relay rejects it → the denial screen offers a "paste your nsec1…" form →
+  import key A → you're the owner. The "you'll lock yourself out" warning in `PLANNING.md` is
+  therefore recoverable in practice, **provided `RELAY_OWNER_PUBKEY` is correct before first boot.**
 - **Secrets to generate once and keep stable** (regenerating = broken identity/data): every value on
   the target VM with e.g. `openssl rand -hex 32` — `BUZZ_RELAY_PRIVATE_KEY` (the relay's own Nostr
   key), `BUZZ_GIT_HOOK_HMAC_SECRET`, `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `BUZZ_S3_ACCESS_KEY`,
@@ -151,7 +184,7 @@ only if the data's value warrants it — it's a one-line `DATABASE_URL` swap, no
 ```bash
 # on a VM with Docker + Docker Compose v2.24.4+, DNS A-record -> VM IP:
 cd deploy/compose
-./gen-env.sh --domain chat.yourdomain.com --owner <your-64-hex-pubkey>
+./gen-env.sh --domain chat.rphaf.io --owner 6a68bbc04fad286751cb73a699ca9428dfe038399e60653428a0864f19c05b2f
 #   ^ generates .env: fills all secrets (openssl), sets domain/owner + our
 #     strip-down toggles. Run on the VM. Without flags it leaves owner/domain
 #     as CHANGE_ME. `run.sh` refuses to boot while any CHANGE_ME remains.
