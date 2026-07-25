@@ -102,8 +102,67 @@ To **re-enable agents later:** flip the Experiments toggles ON, then run the age
   (`buzz-relay/src/nip11.rs`), (2) app identity (`tauri.conf.json` productName/identifier/deep-link
   scheme, mobile bundle IDs, icons), (3) internal `buzz-*` crate names / `BUZZ_*` env / storage keys
   (~1,200 files, high-churn — abandons clean upstream merges; do last if ever).
-- **Self-host the relay:** run the relay `Dockerfile` + managed Postgres + Redis; point friends'
-  desktop apps at the relay URL. Add friends as collaborators on `mpimenta8/rphaf`.
+- **Self-host the relay:** see the dedicated section below. Add friends as collaborators on
+  `mpimenta8/rphaf` for the *code*; add them as relay *members* separately (`./run.sh add-member`).
+
+## Self-hosting the relay
+
+**Vision: start all-in-one, add automated backups on day one.** One small VM ($6–12/mo, 2GB RAM is
+plenty for a friend group) runs the whole stack via Docker Compose; a nightly `pg_dump` offsite
+closes the only scary failure mode (losing the DB) for ~$0. Move Postgres to a managed DB *later*
+only if the data's value warrants it — it's a one-line `DATABASE_URL` swap, not a rebuild.
+
+### The tooling already exists — `deploy/compose/`
+- `compose.yml` (`name: buzz-prod`) — **relay** (`ghcr.io/block/buzz:main`) + **postgres:17** +
+  **redis:7** + **minio** (media). Relay ports: 3000 (WS+HTTP), 8080 (health), 9102 (metrics).
+- `compose.caddy.yml` + `Caddyfile` — Caddy reverse-proxy with automatic Let's Encrypt TLS for
+  `$BUZZ_DOMAIN`; enable with `BUZZ_COMPOSE_TLS=true` (drops the direct relay port via `!reset`).
+- `run.sh` — wrapper: `start | stop | restart | pull | upgrade | logs | status | config |
+  backup-hint | add-member | remove-member | list-members`. `require_env` refuses to boot with
+  `CHANGE_ME` placeholders left in `.env`.
+- `.env.example` — copy to `.env`, replace every `CHANGE_ME`. **`.env` is gitignored — never commit
+  real secrets.**
+
+### Key facts / decisions
+- **The relay image is stock upstream (`ghcr.io/block/buzz:main`) — our fork changes nothing on the
+  server.** The whole "just chat" strip-down is *desktop-client* code. So: run the stock relay image,
+  and distribute our custom desktop build to friends. No custom relay image to build/publish.
+- **Closed relay = you own it.** Prod `.env` sets `BUZZ_REQUIRE_AUTH_TOKEN=true` +
+  `BUZZ_REQUIRE_RELAY_MEMBERSHIP=true` and needs `RELAY_OWNER_PUBKEY` = your 64-hex Nostr pubkey
+  (the desktop identity pubkey). Friends join via `./run.sh add-member <npub-or-hex>` (add `sleep 1`
+  between multiple adds; no parallel adds — same-second timestamp collisions in the roster event).
+- **Secrets to generate once and keep stable** (regenerating = broken identity/data): every value on
+  the target VM with e.g. `openssl rand -hex 32` — `BUZZ_RELAY_PRIVATE_KEY` (the relay's own Nostr
+  key), `BUZZ_GIT_HOOK_HMAC_SECRET`, `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `BUZZ_S3_ACCESS_KEY`,
+  `BUZZ_S3_SECRET_KEY`. (`TYPESENSE_API_KEY` in `.env.example` is vestigial — search uses Postgres
+  FTS; set any random value.) Generate secrets **on the VM**, don't paste them around.
+- **Our strip-down relay toggles belong in this `.env` too:** `BUZZ_HUDDLE_AUDIO_AVAILABLE=false`,
+  `BUZZ_SERVE_GIT_WEB_GUI=false`.
+- **Migrations:** prod `compose.yml` defaults `BUZZ_AUTO_MIGRATE=false`, but `.env.example` sets it
+  `true` for first-boot bootstrap of a fresh DB. Alternative: run `buzz-admin migrate` explicitly.
+- Domain settings in `.env`: `BUZZ_DOMAIN`, `RELAY_URL=wss://<domain>`, `BUZZ_MEDIA_BASE_URL`,
+  `BUZZ_MEDIA_SERVER_DOMAIN`, `BUZZ_CORS_ORIGINS`. Friends connect the desktop app to `RELAY_URL`.
+
+### Deploy recipe
+```bash
+# on a VM with Docker + Docker Compose v2.24.4+, DNS A-record -> VM IP:
+cd deploy/compose && cp .env.example .env
+$EDITOR .env                       # fill every CHANGE_ME (generate secrets on the box)
+BUZZ_COMPOSE_TLS=true ./run.sh start
+./run.sh add-member <your-npub> --role admin
+./run.sh add-member <friend-npub>
+./run.sh status && ./run.sh backup-hint
+```
+
+### Backups (day one, non-negotiable)
+`./run.sh backup-hint` lists everything: `.env` secrets (esp. `BUZZ_RELAY_PRIVATE_KEY`), the Postgres
+data (`pg_dump`), MinIO/S3 bucket, the `buzz-git-data` volume, and Caddy volumes — **snapshot
+Postgres + object/git state from the same window.** Minimum viable: a nightly cron `pg_dump` piped to
+offsite object storage. That single job defuses the "VM disk died" catastrophe.
+
+### Managed-Postgres later (the escape hatch)
+Point `DATABASE_URL` at a managed DB and delete the `postgres` service + its `depends_on` in
+`compose.yml`. The relay VM becomes stateless/disposable; backups + PITR become the provider's job.
 
 ## Key references
 
