@@ -52,7 +52,8 @@ deleted — that was the whole point of doing it with feature flags.
 
 ## Self-hosting
 
-The deploy tooling exists (`deploy/compose/`) and the decisions are made; the
+The deploy tooling exists ([`deploy/compose/`](deploy/compose/README.md), with the step-by-step in
+[`PROVISIONING.md`](deploy/compose/PROVISIONING.md)) and the decisions are made; the
 relay just isn't up yet.
 
 - [ ] Provision the VM and deploy the relay

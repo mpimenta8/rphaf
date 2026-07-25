@@ -47,6 +47,9 @@ Working notes for humans (and agents) collaborating on this fork. This is a
   our gating survived; full test suite green. Strategy A works — this is the payoff.
 - Recipe: `git fetch upstream && git merge --no-edit upstream/main`, then `just ci` (or at least
   `cd desktop && pnpm typecheck && pnpm check`), then `git push origin main`.
+- **Also check what the README driver swallowed:** `git diff HEAD upstream/main -- README.md`.
+  `merge=ours` keeps our README with no conflict and no notice, so this is the only way upstream's
+  README changes ever surface. Do it as part of the merge, not "occasionally" — otherwise never.
 - Low-but-nonzero future risk: if upstream edits the *exact lines* we gated (e.g. the agents nav
   item, the `HuddleBar` mount), expect a **small** conflict — re-apply the `<FeatureGate>` wrap around
   their new code. Minutes, not days.
@@ -123,7 +126,8 @@ To **re-enable agents later:** flip the Experiments toggles ON, then run the age
   - Standing constraint for anything outward-facing: **nothing may claim a feature that's gated off or
     a relay that isn't running.** The README's "Not live yet" marker stays until the relay is up.
   - New prose — docs, UI copy, commit messages — follows `IDENTITY.md`. Code keeps its `buzz` names.
-- **Rebrand** (deeper tiers, beyond the docs pass) Buzz → rphaf, tiered: (1) cosmetic strings + relay NIP-11 name
+- **Rebrand** (deeper tiers, beyond the docs pass) Buzz → rphaf — **[`ROADMAP.md`](ROADMAP.md) is
+  canonical**; this is the short version. Tiered: (1) cosmetic strings + relay NIP-11 name
   (`buzz-relay/src/nip11.rs`), (2) app identity (`tauri.conf.json` productName/identifier/deep-link
   scheme, mobile bundle IDs, icons), (3) internal `buzz-*` crate names / `BUZZ_*` env / storage keys
   (~1,200 files, high-churn — abandons clean upstream merges; do last if ever).

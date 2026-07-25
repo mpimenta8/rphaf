@@ -24,7 +24,7 @@ hard he goes at things. We kept the shape and put our own word in the middle.
 - It's the app, the project, and the repo. There is no second product name to
   learn — "rphaf is a chat app", "the rphaf relay", "open rphaf".
 - Outward-facing pages use the short tagline: **Rocpile Hard AF**.
-- The full version is written out on this page and nowhere else in the repo.
+- The full version is written out on this page and nowhere else in the docs.
   It isn't a secret — it's just not the front door.
 
 ---
