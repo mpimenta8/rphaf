@@ -104,6 +104,14 @@ To **re-enable agents later:** flip the Experiments toggles ON, then run the age
 
 ## Gotchas learned the hard way
 
+- **`Desktop Build (macOS)` fails on our fork, on `main`, and always has** — it dies fetching the
+  `mesh-llm` git dependency (`mesh-llm checkout for 43103c5 not found after cargo fetch`). Same for
+  the Block-internal publish/build jobs. **Not caused by your PR.** Judge a PR by the jobs that
+  actually exercise it (Desktop Core, Desktop E2E, Smoke E2E) plus a local `just ci`.
+- **No shell script is linted anywhere** — no shellcheck in the Justfile, lefthook, or the
+  workflows, and `just ci` never runs `scripts/dev-setup.sh`. Changes to shell scripts need
+  hand-verification (`bash -n`, then actually run the changed lines); CI will not catch them.
+
 - **Hiding UI ≠ deleting data.** The seeded dev community ships a real `@Fizz` agent *member* on the
   relay; feature gates hide agent UI but can't remove identities already in the event log. A fresh
   community you create has **no** agents unless someone runs an agent process.
@@ -118,8 +126,9 @@ To **re-enable agents later:** flip the Experiments toggles ON, then run the age
 ## Roadmap
 
 - **Fold agents back in** (Experiments toggle + run agent processes).
-- **Brand pass — docs only, in PR not merged** (2026-07-25). Branch `rphaf-brand-pass` →
-  **[PR #2](https://github.com/mpimenta8/rphaf/pull/2)**, `just ci` green
+- **Brand pass — docs only, MERGED to `main`** 2026-07-25 as `59e2f3068`
+  (squash of **[PR #2](https://github.com/mpimenta8/rphaf/pull/2)** — the 14 individual commits and
+  their reasoning live on the PR page, not in `git log`), `just ci` green
   (`docs/superpowers/specs/2026-07-25-rphaf-brand-pass-design.md`, `…/plans/…`). Product noun is
   plain **`rphaf`** (no second brand), emoji **🪨** replaces 🐝, README tagline **"Rocpile Hard AF"**.
   Contains: `IDENTITY.md` (the vocabulary anchor — rphaf/rocpile/boysch, the 🪨 rule, tone; the **only**

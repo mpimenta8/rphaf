@@ -11,6 +11,12 @@ reach out in the community channels.
 > tests, code style, and PRs applies unchanged. What differs is naming — user-facing
 > prose uses `rphaf`, per [IDENTITY.md](IDENTITY.md). The code keeps its `buzz`
 > names on purpose ([ROADMAP.md](ROADMAP.md)).
+>
+> **Merging: prefer a merge commit.** Keeping the individual commits in `main`'s
+> history means `git log` carries the reasoning, not just the outcome. GitHub's
+> button remembers whichever method you used last, so check it before you click.
+> Squash or rebase when it genuinely reads better — a branch of fixup commits is a
+> good squash. This is a convention, not a rule; nothing enforces it.
 
 ---
 
