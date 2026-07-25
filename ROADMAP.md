@@ -60,9 +60,12 @@ relay just isn't up yet.
 - [ ] Nightly backups running, with an offsite target set
 - [ ] Do the restore drill once — a backup nobody has restored isn't a backup
 
-**Open decision: the relay hostname.** `boysch.rphaf.io` or `jean.rphaf.io`.
-`MEMORY.md` and `deploy/compose` still say `chat.rphaf.io`; they get updated
-once this is settled, not before.
+**Settled: the relay hostname is `jean.rphaf.io`.** Worth writing down that it's
+expensive to change later. It's baked into the A record, the TLS certificate,
+five `.env` values, and every client's stored relay URL — and media URLs are
+absolute and embedded in immutable events, so retiring the hostname breaks every
+historical image and video while leaving text intact. If it ever has to move,
+keep the old name resolving and serve both from Caddy.
 
 ---
 
