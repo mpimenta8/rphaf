@@ -108,7 +108,13 @@ To **re-enable agents later:** flip the Experiments toggles ON, then run the age
 ## Roadmap
 
 - **Fold agents back in** (Experiments toggle + run agent processes).
-- **Rebrand** Buzz → rphaf/rocpile, tiered: (1) cosmetic strings + relay NIP-11 name
+- **Brand pass — docs only, spec + plan approved 2026-07-25**
+  (`docs/superpowers/specs/2026-07-25-rphaf-brand-pass-design.md`, `…/plans/…`). Product noun is
+  plain **`rphaf`** (no second brand), emoji **🪨** replaces 🐝, README tagline **"Rocpile Hard AF"**,
+  full README rewrite (~267 → ~90 lines) plus new `IDENTITY.md` and `ROADMAP.md`. Scope is
+  documentation only — **no code, no app strings, no relay config.** Constraint: nothing may claim a
+  feature that's gated off or a relay that isn't running. Carries the open hostname decision above.
+- **Rebrand** (deeper tiers, beyond the docs pass) Buzz → rphaf, tiered: (1) cosmetic strings + relay NIP-11 name
   (`buzz-relay/src/nip11.rs`), (2) app identity (`tauri.conf.json` productName/identifier/deep-link
   scheme, mobile bundle IDs, icons), (3) internal `buzz-*` crate names / `BUZZ_*` env / storage keys
   (~1,200 files, high-churn — abandons clean upstream merges; do last if ever).
@@ -127,9 +133,19 @@ value warrants it — it's a one-line `DATABASE_URL` swap, not a rebuild.
   (`npub1df5thsz0455xw5wtwwnfnj559r07qwpenesx2dpg5zry7xwqtvhsks7c9c`). Derived from the backed-up
   `nsec` and cross-checked against the Nostr client. This is `RELAY_OWNER_PUBKEY`.
 - **Domain:** `rphaf.io`, registered by a friend — **DNS changes require a hand-off**, they're not
-  self-serve. Relay hostname is `chat.rphaf.io`. Keep the A-record TTL at 300 so future re-points
-  (e.g. moving hosts) are fast.
-- **Host: DigitalOcean 4 GB (~$24/mo), US region.** Everyone is US-based, and EU hosting's ~90–120ms
+  self-serve. Keep the A-record TTL at 300 so future re-points (e.g. moving hosts) are fast.
+- **⚠️ OPEN: the relay hostname.** `deploy/compose/*` and this file were written against
+  `jean.rphaf.io`, but the brand pass (`docs/superpowers/specs/2026-07-25-rphaf-brand-pass-design.md`
+  §84) treats it as undecided and proposes `boysch.rphaf.io` / `jean.rphaf.io`. **Settle this before
+  the DNS request goes to the domain owner** — it's baked into the A record, the TLS cert, five
+  `.env` values (`BUZZ_DOMAIN`, `RELAY_URL`, `BUZZ_MEDIA_BASE_URL`, `BUZZ_MEDIA_SERVER_DOMAIN`,
+  `BUZZ_CORS_ORIGINS`), and every client's relay URL. Changing it later means a new record, a
+  re-issued cert, and re-pointing everyone.
+- **Host: DigitalOcean, $32/mo Premium Intel — 2 vCPU / 4 GB / 120 GB NVMe / 4 TB transfer**, US
+  region. Took NVMe + the larger disk over the $24 Regular SSD tier: Postgres is I/O-sensitive, and
+  disk is what grows (MinIO media) — DO disk resizes are the one change that is *not* reversible.
+  Note the $24 row in DO's *Premium* list is only **2 GB** — not the same as the $24 Regular 4 GB
+  tier the earlier docs cited. Everyone is US-based, and EU hosting's ~90–120ms
   hurts *media upload/download* specifically (chat send/receive is imperceptible). 4 GB is ~3x the
   estimated ~1.2 GB steady state for "just chat"; DO's CPU/RAM resize is reversible, so starting
   small is low-risk.
@@ -206,7 +222,7 @@ value warrants it — it's a one-line `DATABASE_URL` swap, not a rebuild.
 ```bash
 # on a VM with Docker + Docker Compose v2.24.4+, DNS A-record -> VM IP:
 cd deploy/compose
-./gen-env.sh --domain chat.rphaf.io --owner 6a68bbc04fad286751cb73a699ca9428dfe038399e60653428a0864f19c05b2f
+./gen-env.sh --domain jean.rphaf.io --owner 6a68bbc04fad286751cb73a699ca9428dfe038399e60653428a0864f19c05b2f
 #   ^ generates .env: fills all secrets (openssl), sets domain/owner + our
 #     strip-down toggles. Run on the VM. Without flags it leaves owner/domain
 #     as CHANGE_ME. `run.sh` refuses to boot while any CHANGE_ME remains.

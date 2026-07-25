@@ -3,9 +3,9 @@
 Provider-agnostic steps to stand up the rphaf/Buzz relay on a fresh **Ubuntu 24.04 LTS** VM,
 harden it, install Docker, open the firewall, deploy, and wire nightly offsite backups.
 
-Assumes the recommendation from `PLANNING.md`: a ~8 GB VM (e.g. Hetzner CPX31), the `rphaf.io`
-domain, and that you've settled your **owner key** (see `PLANNING.md` Part 1). Commands are
-copy-paste; run them in order. `sudo`-prefixed commands need root.
+Assumes the recommendation from `PLANNING.md`: a **DigitalOcean 4 GB droplet in a US region**, the
+`rphaf.io` domain, and that you've settled your **owner key** (see `PLANNING.md` Part 1). Commands
+are copy-paste; run them in order. `sudo`-prefixed commands need root.
 
 > **One exception to "in order":** §0 (DNS) needs the VM's IP from §1, and depends on the domain
 > owner. Read §0 first, create the VM (§1), then fire off the DNS request and keep working through
@@ -28,7 +28,7 @@ in the chain, and Caddy can't issue a TLS cert until the name resolves. So:
 4. Only §5 (deploy) actually blocks on the record being live.
 
 ### Pick the hostname
-`chat.rphaf.io` is the assumed name throughout this guide. If you choose differently, substitute it
+`jean.rphaf.io` is the assumed name throughout this guide. If you choose differently, substitute it
 everywhere below — it also lands in `.env` via `gen-env.sh --domain`, and changing it later means
 re-issuing certs and re-pointing every client.
 
@@ -37,8 +37,8 @@ Two options — pick one and be explicit about which, since they're very differe
 
 | Option | What the owner does | Best when |
 |---|---|---|
-| **A. Single A record** (recommended) | Adds one record for `chat.rphaf.io`. Nothing else changes. | You need one hostname and don't expect churn. |
-| **B. NS delegation** | Delegates all of `chat.rphaf.io` (or a `relay.` subtree) to a nameserver you control. | You want to self-serve future records without asking again. |
+| **A. Single A record** (recommended) | Adds one record for `jean.rphaf.io`. Nothing else changes. | You need one hostname and don't expect churn. |
+| **B. NS delegation** | Delegates all of `jean.rphaf.io` (or a `relay.` subtree) to a nameserver you control. | You want to self-serve future records without asking again. |
 
 Start with **A**. It's a two-minute change on their side and doesn't hand you control of anything
 they'd have to trust you with. Move to B only if you find yourself asking repeatedly.
@@ -49,7 +49,7 @@ they'd have to trust you with. Move to B only if you find yourself asking repeat
 >
 > ```
 > Type:  A
-> Name:  chat            (i.e. chat.rphaf.io)
+> Name:  jean            (i.e. jean.rphaf.io)
 > Value: <VM_PUBLIC_IP>
 > TTL:   300
 > Proxy: OFF / "DNS only" — important, see below
@@ -73,8 +73,8 @@ silently half-works.
 From your laptop, once they confirm:
 
 ```bash
-dig +short chat.rphaf.io            # must print the VM's IP, nothing else
-dig +short chat.rphaf.io @1.1.1.1   # check a public resolver too, not just your ISP cache
+dig +short jean.rphaf.io            # must print the VM's IP, nothing else
+dig +short jean.rphaf.io @1.1.1.1   # check a public resolver too, not just your ISP cache
 ```
 
 If the first returns nothing, it hasn't propagated yet — wait, don't retry the deploy. If it returns
@@ -85,10 +85,14 @@ against a name that doesn't point at it.
 ## 1. Create the VM
 
 - Image: **Ubuntu 24.04 LTS**.
-- Size: 8 GB RAM / 2+ vCPU / 80 GB disk (Hetzner CPX31 or equivalent).
-- Add your **SSH public key** during creation (password logins are a liability).
-- If the provider has its own **cloud firewall / security group**, allow inbound **22, 80, 443**
-  there too — the VM's `ufw` (below) is not enough on its own.
+- Plan: **Basic → Premium Intel/AMD, 2 vCPU / 4 GB / 120 GB NVMe** (~$32/mo). Beware DO's `$24` row
+  in the *Premium* list — it's only **2 GB**, which `PLANNING.md` calls too tight.
+- Add your **SSH public key** during creation (password logins are a liability). If DO's setup flow
+  tells you to run `ssh-keygen` and the file already exists, **answer `n`** — overwriting destroys
+  the key registered with GitHub. Paste the existing `~/.ssh/id_ed25519.pub` instead.
+- Backups **off** (we ship offsite backups in §6), monitoring **on**, IPv6 **on**.
+- Skip DO's cloud firewall — §3 configures `ufw`. If you add one anyway, it must allow inbound
+  **22, 80, 443**, or it silently overrides everything `ufw` permits and locks you out.
 
 SSH in:
 
@@ -189,12 +193,12 @@ sudo mkdir -p /opt && sudo chown "$USER" /opt
 git clone https://github.com/mpimenta8/rphaf.git /opt/rphaf
 cd /opt/rphaf/deploy/compose
 
-./gen-env.sh --domain chat.rphaf.io --owner <your-64-hex-pubkey>
+./gen-env.sh --domain jean.rphaf.io --owner <your-64-hex-pubkey>
 grep -q CHANGE_ME .env && { echo "fill remaining CHANGE_ME first"; grep -n CHANGE_ME .env; }
 
 BUZZ_COMPOSE_TLS=true ./run.sh start
 ./run.sh status
-curl -fsS https://chat.rphaf.io/_liveness && echo " <- relay is up"
+curl -fsS https://jean.rphaf.io/_liveness && echo " <- relay is up"
 ```
 
 Add yourself + friends (see `PLANNING.md` Part 1 for the owner-key rule):
@@ -204,7 +208,7 @@ Add yourself + friends (see `PLANNING.md` Part 1 for the owner-key rule):
 ./run.sh add-member <friend-npub>          # sleep 1 between multiple adds
 ```
 
-Friends point the desktop app at `wss://chat.rphaf.io`.
+Friends point the desktop app at `wss://jean.rphaf.io`.
 
 ### Optional: cap Redis on a 4 GB box
 `compose.yml` starts Redis with no `maxmemory`, so nothing bounds its growth. In practice Buzz only
@@ -219,6 +223,32 @@ version anyway, append to the `redis` service `command:`:
 `volatile-lru` only evicts keys that already carry a TTL, so it can't discard anything meant to
 persist. Watch it first with `docker compose exec redis redis-cli -a "$REDIS_PASSWORD" info memory`
 before deciding you need it.
+
+## 5b. If you ever change the relay hostname (read before you do)
+
+Mechanically it's small: add the new A record, update the five domain values in `.env`
+(`BUZZ_DOMAIN`, `RELAY_URL`, `BUZZ_MEDIA_BASE_URL`, `BUZZ_MEDIA_SERVER_DOMAIN`,
+`BUZZ_CORS_ORIGINS`), restart, and let Caddy issue a fresh certificate. Everyone then re-points
+their client once.
+
+**But never retire the old hostname.** Media URLs are stored **absolute**, not relative —
+`crates/buzz-relay/src/api/media.rs` builds `https://<host>/media/<sha256>.<ext>` and that complete
+URL is embedded into message events and `imeta` tags at post time. Events are immutable and nothing
+rewrites them, so every image and video ever shared keeps pointing at the hostname that was live
+when it was posted. Drop that name and your whole media history 404s while text survives — a quiet
+failure that only shows up in old scrollback.
+
+Keep the old name resolving to the same box, and serve both from Caddy:
+
+```caddyfile
+{$BUZZ_DOMAIN}, old.rphaf.io {
+  encode zstd gzip
+  reverse_proxy relay:3000
+}
+```
+
+Caddy accepts comma-separated site addresses and maintains certificates for both. Cost is one DNS
+record you simply never delete.
 
 ## 6. Nightly offsite backups (day one)
 
