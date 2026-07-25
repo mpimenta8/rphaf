@@ -11,10 +11,30 @@ Working notes for humans (and agents) collaborating on this fork. This is a
   learn the infrastructure. Agents/workflows/git-forge/voice are on the roadmap, not the first cut.
 
 ### Git remotes
-- `origin` → `github.com/mpimenta8/rphaf` (our repo — we push here; add friends as collaborators).
+- `origin` → `git@github.com:mpimenta8/rphaf.git` (our repo — we push here; add friends as
+  collaborators). **Uses SSH**, on purpose — see "Pushing" below.
 - `upstream` → `github.com/block/buzz` (**fetch-only**, push disabled). Pull Block's updates with
   `git fetch upstream && git merge upstream/main`.
 - **Keep upstream merges clean:** prefer changes that don't rewrite shared server/Rust files.
+
+### Pushing (use SSH, not HTTPS)
+- `origin` is an **SSH** URL. If it ever reverts to HTTPS, pushes that touch `.github/workflows/*`
+  get **rejected** — a GitHub `gh` OAuth token lacks the `workflow` scope, and workflow-file changes
+  arrive routinely via upstream merges. SSH is not subject to that restriction, so we push over SSH.
+- Fix if you hit it: `git remote set-url origin git@github.com:mpimenta8/rphaf.git` (or, to stay on
+  HTTPS, `gh auth refresh -s workflow`).
+- Pre-push hooks run clippy + unit tests (Rust, desktop, Tauri, mobile). **Activate hermit first**
+  (`. ./bin/activate-hermit`) or the hooks fail with `just: command not found`.
+
+### Syncing upstream (proven clean)
+- Cadence: **sync often** — small, frequent merges beat one giant catch-up.
+- Verified end-to-end once already: merged **36 upstream commits (→ v0.4.25) with ZERO conflicts**;
+  our gating survived; full test suite green. Strategy A works — this is the payoff.
+- Recipe: `git fetch upstream && git merge --no-edit upstream/main`, then `just ci` (or at least
+  `cd desktop && pnpm typecheck && pnpm check`), then `git push origin main`.
+- Low-but-nonzero future risk: if upstream edits the *exact lines* we gated (e.g. the agents nav
+  item, the `HuddleBar` mount), expect a **small** conflict — re-apply the `<FeatureGate>` wrap around
+  their new code. Minutes, not days.
 
 ## Running it locally
 
