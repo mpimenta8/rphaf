@@ -18,7 +18,7 @@ Scope is documentation only. No code, no strings in the app, no relay config.
 |---|---|
 | Product noun | `rphaf`, used as a plain noun everywhere. No second brand ("Roc", "Rocpile") to explain. |
 | Emoji | `🪨` replaces `🐝`. |
-| Tagline | **Rocpile Hard As F\*\*\*** — censored in README, spelled out once in IDENTITY.md. |
+| Tagline | **Rocpile Hard AF** on the README; spelled out in full once in IDENTITY.md. No asterisk-censoring anywhere — it's either abbreviated or written out. |
 | README treatment | Full rewrite. The inherited Buzz pitch is dropped, not re-skinned. |
 | Screenshots | Keep exactly one (`docs/assets/screenshots/channel-thread.png`), captioned honestly as upstream chrome. |
 | Deeper re-skin | Deferred to ROADMAP.md. |
@@ -62,8 +62,8 @@ The anchor doc. Its job is to stop brand drift as friends start committing.
   *Trailer Park Boys*. Note it's a slogan first and a project name second.
 - **rocpile** — the friend group; one of our words for ourselves.
 - **boysch / the boysch** — the members, collectively and individually.
-- **Usage** — how to write the name (lowercase `rphaf`), the `🪨` rule, where the
-  censored vs uncensored tagline goes, what the tone is and isn't.
+- **Usage** — how to write the name (lowercase `rphaf`), the `🪨` rule, when to
+  use **Rocpile Hard AF** vs the full phrase, what the tone is and isn't.
 
 ### 3. `ROADMAP.md` — new
 
