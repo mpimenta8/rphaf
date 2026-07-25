@@ -113,12 +113,16 @@ To **re-enable agents later:** flip the Experiments toggles ON, then run the age
 ## Roadmap
 
 - **Fold agents back in** (Experiments toggle + run agent processes).
-- **Brand pass — docs only, spec + plan approved 2026-07-25**
+- **Brand pass — docs only, ~done 2026-07-25** on branch `rphaf-brand-pass`
   (`docs/superpowers/specs/2026-07-25-rphaf-brand-pass-design.md`, `…/plans/…`). Product noun is
-  plain **`rphaf`** (no second brand), emoji **🪨** replaces 🐝, README tagline **"Rocpile Hard AF"**,
-  full README rewrite (~267 → ~90 lines) plus new `IDENTITY.md` and `ROADMAP.md`. Scope is
-  documentation only — **no code, no app strings, no relay config.** Constraint: nothing may claim a
-  feature that's gated off or a relay that isn't running. Carries the open hostname decision above.
+  plain **`rphaf`** (no second brand), emoji **🪨** replaces 🐝, README tagline **"Rocpile Hard AF"**.
+  Landed: `IDENTITY.md` (the vocabulary anchor — rphaf/rocpile/boysch, the 🪨 rule, tone; the **only**
+  place the full phrase is spelled out), `ROADMAP.md` (deferred tiers + self-hosting), README rewritten
+  267 → 135 lines, and the `merge=ours` protection above. Scope was documentation only — **no code, no
+  app strings, no relay config.**
+  - Standing constraint for anything outward-facing: **nothing may claim a feature that's gated off or
+    a relay that isn't running.** The README's "Not live yet" marker stays until the relay is up.
+  - New prose — docs, UI copy, commit messages — follows `IDENTITY.md`. Code keeps its `buzz` names.
 - **Rebrand** (deeper tiers, beyond the docs pass) Buzz → rphaf, tiered: (1) cosmetic strings + relay NIP-11 name
   (`buzz-relay/src/nip11.rs`), (2) app identity (`tauri.conf.json` productName/identifier/deep-link
   scheme, mobile bundle IDs, icons), (3) internal `buzz-*` crate names / `BUZZ_*` env / storage keys
