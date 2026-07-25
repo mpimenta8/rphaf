@@ -289,36 +289,20 @@ Point `DATABASE_URL` at a managed DB and delete the `postgres` service + its `de
 
 ## Getting the app to friends (builds + signing)
 
-**We must build and distribute the desktop app ourselves.** `just release-desktop` tags a version
-that triggers `release.yml` **in `block/buzz`**, which signs and notarizes with *Block's* Apple
-credentials (`RELEASING.md`). A fork has no access to those secrets, so that path is closed. Our
-build is `cd desktop && pnpm tauri build`.
+**Full write-up: [`docs/distribution.md`](docs/distribution.md).** The need-to-know:
 
-You do **not** need any of this to test the relay yourself — `just dev` runs a local build with your
-identity. Signing only matters when handing a installer to someone else.
-
-| Platform | Free? | Friend's experience |
-|---|---|---|
-| Linux | ✅ clean | AppImage/`.deb` just runs |
-| Android | ✅ clean | Self-signed APK; enable "install unknown apps" once. No Play Store needed |
-| Windows | ⚠️ free w/ friction | SmartScreen → *More info* → *Run anyway* (real certs are ~$300–500/yr) |
-| macOS | ⚠️ free w/ friction | Blocked on first launch → **System Settings → Privacy & Security → "Open Anyway"**, or `xattr -dr com.apple.quarantine`. The old Control-click→Open bypass no longer works on recent macOS |
-| **iOS** | ❌ **no free path** | Free Apple ID sideloading expires every **7 days**; TestFlight and ad-hoc both require the paid program |
-
-- **iPhone is the only hard paywall.** If anyone in the group has one, the **$99/yr Apple Developer
-  Program** is effectively mandatory — and **one membership covers both** Apple platforms: Developer
-  ID notarization kills the macOS warning *and* TestFlight handles iPhones (100 internal testers, no
-  review, 90-day builds). It's the only item in the project with an external queue, so enroll early
-  if it's needed at all.
-- **The mobile app has NO feature gating** — verified: zero feature-flag references anywhere in
-  `mobile/lib`. The whole "just chat" strip-down is desktop-only (`preview-features.json` +
-  `<FeatureGate>` under `desktop/src`). Shipping the Flutter app as-is would expose the **full** Buzz
-  surface (agents, huddles, workflows, projects) on phones while desktop hides it — mismatched UX for
-  exactly the non-technical audience this is for. Reaching parity means porting the gating pass to
-  Flutter: real work, not config.
-- **Therefore: desktop-first.** Relay live → everyone on the desktop build → treat mobile as a
-  deliberate phase two. This also defers the $99 question, since nothing about the relay or the
-  desktop rollout depends on it.
+- **We build and distribute ourselves.** `just release-desktop` triggers `release.yml` in
+  `block/buzz`, which signs with *Block's* Apple credentials — closed to a fork. Ours is
+  `just desktop-release-build` (already labelled "unsigned, for testing"; note it stubs the
+  sidecar binaries, which is fine only while agents stay gated off).
+- **Decision: desktop-first, unsigned.** macOS/Windows cost the friend one click-through;
+  Linux and Android are clean and free.
+- **iPhone is the only hard paywall** — no free path that survives past 7 days. The $99/yr Apple
+  Developer Program covers **both** Apple platforms (macOS notarization *and* TestFlight), and is
+  the only item in the project with an external queue.
+- **Mobile has NO feature gating** (verified: zero flag references in `mobile/lib`), so shipping
+  Flutter as-is exposes the full Buzz surface on phones while desktop hides it.
+- Signing is **downstream of everything** — `just dev` tests the relay fine without it.
 
 ## Key references
 
