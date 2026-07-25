@@ -146,8 +146,11 @@ only if the data's value warrants it — it's a one-line `DATABASE_URL` swap, no
 ### Deploy recipe
 ```bash
 # on a VM with Docker + Docker Compose v2.24.4+, DNS A-record -> VM IP:
-cd deploy/compose && cp .env.example .env
-$EDITOR .env                       # fill every CHANGE_ME (generate secrets on the box)
+cd deploy/compose
+./gen-env.sh --domain chat.yourdomain.com --owner <your-64-hex-pubkey>
+#   ^ generates .env: fills all secrets (openssl), sets domain/owner + our
+#     strip-down toggles. Run on the VM. Without flags it leaves owner/domain
+#     as CHANGE_ME. `run.sh` refuses to boot while any CHANGE_ME remains.
 BUZZ_COMPOSE_TLS=true ./run.sh start
 ./run.sh add-member <your-npub> --role admin
 ./run.sh add-member <friend-npub>
