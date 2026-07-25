@@ -178,6 +178,19 @@ git -C "${REPO_ROOT}" config --local core.hooksPath "$HOOKS_DIR"
 lefthook install --force
 success "Git hooks installed"
 
+# ---- Configure the README merge driver (rphaf fork) -------------------------
+
+log "Configuring the README merge driver..."
+# .gitattributes marks `README.md merge=ours` so `git merge upstream/main` keeps our
+# rewritten README instead of conflicting on every upstream README change. The driver
+# it names lives in git config, which is per-clone and never cloned -- so without this
+# line a fresh checkout silently falls back to a normal conflict. Setting it here means
+# `just setup` heals it, rather than it living only in MEMORY.md as a thing to remember.
+# Note the tradeoff: the driver discards upstream README changes with no conflict and no
+# notice. `git diff HEAD upstream/main -- README.md` is how you see what was skipped.
+git -C "${REPO_ROOT}" config --local merge.ours.driver true
+success "README merge driver configured"
+
 # ---- Print connection info --------------------------------------------------
 
 echo ""

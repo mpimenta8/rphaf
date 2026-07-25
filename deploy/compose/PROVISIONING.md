@@ -45,29 +45,38 @@ they'd have to trust you with. Move to B only if you find yourself asking repeat
 
 ### Message to send
 
-> Can you add a DNS record on `rphaf.io`?
+`rphaf.io` is hosted on **AWS Route 53** (verified via `dig NS rphaf.io` — `ns-*.awsdns-*`), so
+there's no CDN/proxy layer to worry about and the record is a plain A record:
+
+> Can you add a DNS record for `rphaf.io` in Route 53?
+>
+> In the `rphaf.io` hosted zone → **Create record**:
 >
 > ```
-> Type:  A
-> Name:  jean            (i.e. jean.rphaf.io)
-> Value: <VM_PUBLIC_IP>
-> TTL:   300
-> Proxy: OFF / "DNS only" — important, see below
+> Record name:  jean          (full name: jean.rphaf.io)
+> Record type:  A
+> Value:        <VM_PUBLIC_IP>
+> TTL:          300
+> Routing:      Simple routing
 > ```
 >
 > Low TTL (300s) on purpose so we can fix mistakes fast; we can raise it once it's stable.
 
-### Cloudflare caveat (the one that will actually bite)
-If `rphaf.io` sits behind Cloudflare, the record **must be "DNS only" (grey cloud), not proxied
-(orange cloud)**. A proxied record breaks this stack two ways:
+### If the domain ever moves behind a proxy (Cloudflare et al.)
+Not currently applicable on Route 53, but if `rphaf.io` is ever fronted by Cloudflare, the record
+**must be "DNS only" (grey cloud), not proxied (orange cloud)** — a proxied record breaks this stack
+two ways:
 
-- Caddy's Let's Encrypt **HTTP-01 challenge** fails, because Cloudflare terminates :80/:443 itself —
+- Caddy's Let's Encrypt **HTTP-01 challenge** fails, because the proxy terminates :80/:443 itself —
   so the relay never gets a certificate.
-- Cloudflare's default proxy timeouts sever **long-lived WebSocket** connections, which is the
-  relay's entire transport (`wss://`).
+- Default proxy timeouts sever **long-lived WebSocket** connections, which is the relay's entire
+  transport (`wss://`).
 
-Say "grey cloud / DNS only" explicitly in the request. It's the single most common way this step
-silently half-works.
+### Hold off on the AAAA record
+The droplet has a public IPv6 address, but **add IPv4 only to start.** Let's Encrypt *prefers* IPv6
+when an AAAA record exists, so if the host's IPv6 routing or firewall isn't right, certificate
+issuance fails while everything looks healthy over IPv4 — a confusing way to lose an afternoon. Add
+AAAA later, once the relay is up and IPv6 reachability is confirmed.
 
 ### Verify before you deploy
 From your laptop, once they confirm:

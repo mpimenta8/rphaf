@@ -20,6 +20,13 @@ Working notes for humans (and agents) collaborating on this fork. This is a
   `git remote set-url origin git@github.com:mpimenta8/rphaf.git`,
   `git remote add upstream https://github.com/block/buzz.git`,
   `git remote set-url --push upstream DISABLED`.
+- **The README merge driver is set by `just setup`** (`scripts/dev-setup.sh`, beside the
+  `core.hooksPath` line) — no longer a manual step. `.gitattributes` marks `README.md merge=ours`
+  so upstream merges keep our rewritten README, but the driver config lives in `.git/config` and
+  isn't cloned. If you ever skip `just setup`, set it by hand:
+  `git config merge.ours.driver true`. Without it, merges touching the README conflict instead —
+  noisy, not dangerous. Note the driver discards upstream README changes *silently*;
+  `git diff HEAD upstream/main -- README.md` shows what we're skipping.
 - **Keep upstream merges clean:** prefer changes that don't rewrite shared server/Rust files.
 
 ### Pushing (SSH — now actually configured)
@@ -42,6 +49,9 @@ Working notes for humans (and agents) collaborating on this fork. This is a
   our gating survived; full test suite green. Strategy A works — this is the payoff.
 - Recipe: `git fetch upstream && git merge --no-edit upstream/main`, then `just ci` (or at least
   `cd desktop && pnpm typecheck && pnpm check`), then `git push origin main`.
+- **Also check what the README driver swallowed:** `git diff HEAD upstream/main -- README.md`.
+  `merge=ours` keeps our README with no conflict and no notice, so this is the only way upstream's
+  README changes ever surface. Do it as part of the merge, not "occasionally" — otherwise never.
 - Low-but-nonzero future risk: if upstream edits the *exact lines* we gated (e.g. the agents nav
   item, the `HuddleBar` mount), expect a **small** conflict — re-apply the `<FeatureGate>` wrap around
   their new code. Minutes, not days.
@@ -108,13 +118,26 @@ To **re-enable agents later:** flip the Experiments toggles ON, then run the age
 ## Roadmap
 
 - **Fold agents back in** (Experiments toggle + run agent processes).
-- **Brand pass — docs only, spec + plan approved 2026-07-25**
+- **Brand pass — docs only, in PR not merged** (2026-07-25). Branch `rphaf-brand-pass` →
+  **[PR #2](https://github.com/mpimenta8/rphaf/pull/2)**, `just ci` green
   (`docs/superpowers/specs/2026-07-25-rphaf-brand-pass-design.md`, `…/plans/…`). Product noun is
-  plain **`rphaf`** (no second brand), emoji **🪨** replaces 🐝, README tagline **"Rocpile Hard AF"**,
-  full README rewrite (~267 → ~90 lines) plus new `IDENTITY.md` and `ROADMAP.md`. Scope is
-  documentation only — **no code, no app strings, no relay config.** Constraint: nothing may claim a
-  feature that's gated off or a relay that isn't running. Carries the open hostname decision above.
-- **Rebrand** (deeper tiers, beyond the docs pass) Buzz → rphaf, tiered: (1) cosmetic strings + relay NIP-11 name
+  plain **`rphaf`** (no second brand), emoji **🪨** replaces 🐝, README tagline **"Rocpile Hard AF"**.
+  Contains: `IDENTITY.md` (the vocabulary anchor — rphaf/rocpile/boysch, the 🪨 rule, tone; the **only**
+  place the full phrase is spelled out), `ROADMAP.md` (deferred tiers + self-hosting), README rewritten
+  267 → 132 lines, and the `merge=ours` protection above. Scope was documentation only — **no code, no
+  app strings, no relay config.**
+  - Standing constraint for anything outward-facing: **nothing may claim a feature that's gated off or
+    a relay that isn't running.** The README's "Not live yet" marker stays until the relay is up.
+  - New prose — docs, UI copy, commit messages — follows `IDENTITY.md`. Code keeps its `buzz` names.
+  - *Get in* points at the **`#rphaf-dev` Slack channel** for both relay status and sending your
+    npub — deliberately a channel, not a person, so onboarding doesn't route through one human.
+  - Remaining gap: it tells friends the desktop app comes "from this repo" — see the build item below.
+- **Ship a packaged desktop build — blocks inviting anyone.** The README's *Get in* path assumes a
+  build exists; today each friend would have to compile it themselves, which is a non-starter for
+  non-developers. **Planned right after the DigitalOcean VM is up.** Upstream's own release flow is in
+  `RELEASING.md`; ours needs to produce our gated ("just chat") desktop build, not the stock one.
+- **Rebrand** (deeper tiers, beyond the docs pass) Buzz → rphaf — **[`ROADMAP.md`](ROADMAP.md) is
+  canonical**; this is the short version. Tiered: (1) cosmetic strings + relay NIP-11 name
   (`buzz-relay/src/nip11.rs`), (2) app identity (`tauri.conf.json` productName/identifier/deep-link
   scheme, mobile bundle IDs, icons), (3) internal `buzz-*` crate names / `BUZZ_*` env / storage keys
   (~1,200 files, high-churn — abandons clean upstream merges; do last if ever).
@@ -134,13 +157,18 @@ value warrants it — it's a one-line `DATABASE_URL` swap, not a rebuild.
   `nsec` and cross-checked against the Nostr client. This is `RELAY_OWNER_PUBKEY`.
 - **Domain:** `rphaf.io`, registered by a friend — **DNS changes require a hand-off**, they're not
   self-serve. Keep the A-record TTL at 300 so future re-points (e.g. moving hosts) are fast.
-- **⚠️ OPEN: the relay hostname.** `deploy/compose/*` and this file were written against
-  `jean.rphaf.io`, but the brand pass (`docs/superpowers/specs/2026-07-25-rphaf-brand-pass-design.md`
-  §84) treats it as undecided and proposes `boysch.rphaf.io` / `jean.rphaf.io`. **Settle this before
-  the DNS request goes to the domain owner** — it's baked into the A record, the TLS cert, five
-  `.env` values (`BUZZ_DOMAIN`, `RELAY_URL`, `BUZZ_MEDIA_BASE_URL`, `BUZZ_MEDIA_SERVER_DOMAIN`,
-  `BUZZ_CORS_ORIGINS`), and every client's relay URL. Changing it later means a new record, a
-  re-issued cert, and re-pointing everyone.
+- **Relay hostname: `jean.rphaf.io` — settled** (2026-07-25, commit `5cf28ad01`). The brand pass
+  briefly reopened this as `boysch.` vs `jean.`; it's closed, and `deploy/compose/*` is written
+  against `jean`. Treat it as fixed: it's baked into the A record, the TLS cert, five `.env` values
+  (`BUZZ_DOMAIN`, `RELAY_URL`, `BUZZ_MEDIA_BASE_URL`, `BUZZ_MEDIA_SERVER_DOMAIN`,
+  `BUZZ_CORS_ORIGINS`), and every client's stored relay URL. Changing it later means a new record, a
+  re-issued cert, re-pointing everyone, **and breaking every historical image/video** — media URLs
+  are absolute and embedded in immutable events. If it ever must change, keep the old name resolving
+  and serve both from Caddy.
+- **DNS is AWS Route 53**, verified via `dig NS rphaf.io` — no Cloudflare proxy layer, so the
+  grey-cloud/proxy caveat doesn't apply. Request a plain A record. **IPv4 only at first:** Let's
+  Encrypt prefers IPv6 when an AAAA record exists, so an unverified IPv6 path fails cert issuance
+  while everything looks healthy over IPv4.
 - **Host: DigitalOcean, $32/mo Premium Intel — 2 vCPU / 4 GB / 120 GB NVMe / 4 TB transfer**, US
   region. Took NVMe + the larger disk over the $24 Regular SSD tier: Postgres is I/O-sensitive, and
   disk is what grows (MinIO media) — DO disk resizes are the one change that is *not* reversible.

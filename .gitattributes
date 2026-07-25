@@ -1,0 +1,10 @@
+# README.md is fork-owned: it describes rphaf, not upstream Buzz.
+# Keep ours on `git merge upstream/main` instead of conflicting every time.
+#
+# Requires a one-time, per-clone: git config merge.ours.driver true
+# Without it this falls back to a normal conflict -- noisy, but safe.
+#
+# Tradeoff: upstream README changes are discarded SILENTLY. Occasionally run
+#   git diff HEAD upstream/main -- README.md
+# to see what we're skipping. See ROADMAP.md.
+README.md merge=ours
