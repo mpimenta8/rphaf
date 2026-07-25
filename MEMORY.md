@@ -122,6 +122,10 @@ only if the data's value warrants it — it's a one-line `DATABASE_URL` swap, no
   `CHANGE_ME` placeholders left in `.env`.
 - `.env.example` — copy to `.env`, replace every `CHANGE_ME`. **`.env` is gitignored — never commit
   real secrets.**
+- `gen-env.sh` — bootstraps `.env` (secrets + toggles + owner/domain). `backup.sh` — nightly backup.
+- **`PLANNING.md`** — pre-deploy decisions: owner-key guide + host-options matrix/recommendation.
+- **`PROVISIONING.md`** — step-by-step: bare Ubuntu VM → hardening → Docker → ufw → deploy → backup
+  cron → restore drill.
 
 ### Key facts / decisions
 - **The relay image is stock upstream (`ghcr.io/block/buzz:main`) — our fork changes nothing on the
@@ -158,10 +162,11 @@ BUZZ_COMPOSE_TLS=true ./run.sh start
 ```
 
 ### Backups (day one, non-negotiable)
-`./run.sh backup-hint` lists everything: `.env` secrets (esp. `BUZZ_RELAY_PRIVATE_KEY`), the Postgres
-data (`pg_dump`), MinIO/S3 bucket, the `buzz-git-data` volume, and Caddy volumes — **snapshot
-Postgres + object/git state from the same window.** Minimum viable: a nightly cron `pg_dump` piped to
-offsite object storage. That single job defuses the "VM disk died" catastrophe.
+`deploy/compose/backup.sh` does it: `pg_dump` + MinIO/git volume tars + `.env` snapshot + local
+rotation + optional offsite via rclone (`BACKUP_RCLONE_REMOTE`, e.g. in a gitignored `backup.env`).
+Schedule it nightly via cron. A local-only backup dies with the VM — **set the offsite target.**
+`./run.sh backup-hint` prints the full checklist. **A backup you haven't restore-tested isn't a
+backup** — do the restore drill once (see `PROVISIONING.md` §7).
 
 ### Managed-Postgres later (the escape hatch)
 Point `DATABASE_URL` at a managed DB and delete the `postgres` service + its `depends_on` in

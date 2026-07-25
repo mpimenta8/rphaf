@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+#
+# backup.sh — nightly backup for the rphaf/Buzz compose stack.
+#
+# Captures a consistent snapshot of everything you can't recreate:
+#   - Postgres        (logical `pg_dump` — the critical, irreplaceable state)
+#   - MinIO media      (object volume tar — uploaded images/video/attachments)
+#   - git-data volume  (repos, if the git feature is ever used)
+#   - .env             (your stable secrets — keep this backup dir locked down)
+# Then rotates local copies and, if configured, ships the set OFFSITE.
+#
+# A backup that lives only on the same VM does NOT survive a VM/disk loss —
+# set an offsite target (see below) before you rely on this.
+#
+# Run from deploy/compose. Configure via env or an optional ./backup.env:
+#   BACKUP_DIR            where to write locally      (default /var/backups/buzz)
+#   KEEP_DAYS             local retention in days     (default 14)
+#   BACKUP_RCLONE_REMOTE  rclone remote:path offsite  (default empty = local only)
+#
+# Cron example (nightly 03:15 UTC):
+#   15 3 * * * cd /opt/rphaf/deploy/compose && ./backup.sh >> /var/log/buzz-backup.log 2>&1
+#
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")"
+
+# Optional local config file (keep secrets/paths out of the crontab line).
+[[ -f backup.env ]] && . ./backup.env
+
+BACKUP_DIR="${BACKUP_DIR:-/var/backups/buzz}"
+KEEP_DAYS="${KEEP_DAYS:-14}"
+RCLONE_REMOTE="${BACKUP_RCLONE_REMOTE:-}"
+COMPOSE=(docker compose --env-file .env -f compose.yml)
+
+log() { printf '[buzz-backup %s] %s\n' "$(date -u +%H:%M:%SZ)" "$*"; }
+die() { log "ERROR: $*" >&2; exit 1; }
+
+[[ -f .env ]] || die "no .env here — run from deploy/compose on the deploy host"
+command -v docker >/dev/null || die "docker not found"
+"${COMPOSE[@]}" ps --status running --services 2>/dev/null | grep -qx postgres \
+  || die "postgres service is not running — start the stack first (./run.sh start)"
+
+TS="$(date -u +%Y%m%d-%H%M%SZ)"
+DEST="${BACKUP_DIR}/${TS}"
+mkdir -p "$DEST"
+chmod 700 "$BACKUP_DIR" "$DEST"
+
+# --- 1. Postgres: logical dump (transactionally consistent), gzipped. -------
+log "dumping postgres…"
+"${COMPOSE[@]}" exec -T postgres sh -c \
+  'exec pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --clean --if-exists' \
+  | gzip -9 > "${DEST}/postgres.sql.gz"
+[[ -s "${DEST}/postgres.sql.gz" ]] || die "postgres dump is empty — aborting"
+
+# --- 2. Volume tars (media + git) from a throwaway alpine container. --------
+tar_volume() {
+  local pattern="$1" out="$2" vol
+  vol="$(docker volume ls --format '{{.Name}}' | grep -E "$pattern" | head -1 || true)"
+  if [[ -z "$vol" ]]; then log "  no volume matching /$pattern/ — skipping ${out}"; return; fi
+  log "archiving volume ${vol} -> ${out}…"
+  docker run --rm -v "${vol}:/data:ro" -v "${DEST}:/backup" alpine \
+    tar czf "/backup/${out}" -C /data . 2>/dev/null \
+    || log "  (${vol} empty or unreadable — skipped)"
+}
+tar_volume 'buzz.*minio-data$' minio-data.tar.gz
+tar_volume 'buzz.*git-data$'   git-data.tar.gz
+
+# --- 3. Secrets snapshot (locked down). ------------------------------------
+cp .env "${DEST}/env.snapshot"
+chmod 600 "${DEST}/env.snapshot"
+
+# --- 4. Manifest + checksums. ----------------------------------------------
+( cd "$DEST" && sha256sum ./* > SHA256SUMS )
+log "local backup ready: ${DEST} ($(du -sh "$DEST" | cut -f1))"
+
+# --- 5. Offsite (optional, strongly recommended). --------------------------
+if [[ -n "$RCLONE_REMOTE" ]]; then
+  command -v rclone >/dev/null || die "BACKUP_RCLONE_REMOTE set but rclone not installed"
+  log "shipping offsite -> ${RCLONE_REMOTE}/${TS}"
+  rclone copy "$DEST" "${RCLONE_REMOTE}/${TS}"
+  log "offsite copy complete"
+else
+  log "WARNING: no offsite target (BACKUP_RCLONE_REMOTE empty)."
+  log "         A local-only backup dies with the VM — configure offsite."
+fi
+
+# --- 6. Rotate local copies. -----------------------------------------------
+log "pruning local backups older than ${KEEP_DAYS} day(s)…"
+find "$BACKUP_DIR" -mindepth 1 -maxdepth 1 -type d -mtime "+${KEEP_DAYS}" -exec rm -rf {} +
+log "done."
