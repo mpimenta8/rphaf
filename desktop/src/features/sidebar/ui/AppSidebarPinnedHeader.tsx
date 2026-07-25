@@ -143,18 +143,20 @@ export function AppSidebarPrimaryMenu({
             </SidebarMenuButton>
           </SidebarMenuItem>
         </FeatureGate>
-        <SidebarMenuItem>
-          <SidebarMenuButton
-            data-testid="open-agents-view"
-            isActive={selectedView === "agents"}
-            onClick={onSelectAgents}
-            tooltip="Agents"
-            type="button"
-          >
-            <Bot className="h-4 w-4" />
-            <SidebarMenuLabel>Agents</SidebarMenuLabel>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
+        <FeatureGate feature="agents">
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              data-testid="open-agents-view"
+              isActive={selectedView === "agents"}
+              onClick={onSelectAgents}
+              tooltip="Agents"
+              type="button"
+            >
+              <Bot className="h-4 w-4" />
+              <SidebarMenuLabel>Agents</SidebarMenuLabel>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </FeatureGate>
         <FeatureGate feature="workflows">
           <SidebarMenuItem>
             <SidebarMenuButton

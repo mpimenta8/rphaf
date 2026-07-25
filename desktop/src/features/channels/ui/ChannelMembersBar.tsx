@@ -12,6 +12,7 @@ import {
 import { requestOpenCreateAgent } from "@/features/agents/openCreateAgentEvent";
 import { useChannelMembersQuery } from "@/features/channels/hooks";
 import { canStartHuddleInChannel } from "@/features/channels/lib/huddleAvailability";
+import { useFeatureEnabled } from "@/shared/features";
 import type { Channel } from "@/shared/api/types";
 import { normalizePubkey } from "@/shared/lib/pubkey";
 import { Button } from "@/shared/ui/button";
@@ -56,6 +57,8 @@ export function ChannelMembersBar({
     [isAddBotOpenProp, onAddBotOpenChange],
   );
   const { startHuddle, isStarting: isStartingHuddle } = useHuddle();
+  const huddleEnabled = useFeatureEnabled("huddle");
+  const agentsEnabled = useFeatureEnabled("agents");
   const queryClient = useQueryClient();
   const membersQuery = useChannelMembersQuery(channel.id);
   const providersQuery = useAvailableAcpRuntimes();
@@ -108,7 +111,7 @@ export function ChannelMembersBar({
           ? relayAgentsQuery.error.message
           : null;
 
-  const huddleIndicator = (
+  const huddleIndicator = huddleEnabled ? (
     <HuddleIndicator
       channelId={channel.id}
       onStart={async () => {
@@ -132,7 +135,7 @@ export function ChannelMembersBar({
       renderMode={variant === "compact" ? "menu-item" : "button"}
       startDisabled={!canStartHuddle || isStartingHuddle}
     />
-  );
+  ) : null;
 
   const controls =
     variant === "compact" ? (
@@ -214,20 +217,22 @@ export function ChannelMembersBar({
     <React.Fragment>
       {controls}
 
-      <AddChannelBotDialog
-        channelId={channel.id}
-        onCreateAgent={() => {
-          requestOpenCreateAgent({
-            channelId: channel.id,
-            channelName: channel.name,
-          });
-        }}
-        onOpenChange={setIsAddBotOpen}
-        open={isAddBotOpen}
-        providers={providers}
-        providersErrorMessage={dialogErrorMessage}
-        providersLoading={providersQuery.isLoading}
-      />
+      {agentsEnabled ? (
+        <AddChannelBotDialog
+          channelId={channel.id}
+          onCreateAgent={() => {
+            requestOpenCreateAgent({
+              channelId: channel.id,
+              channelName: channel.name,
+            });
+          }}
+          onOpenChange={setIsAddBotOpen}
+          open={isAddBotOpen}
+          providers={providers}
+          providersErrorMessage={dialogErrorMessage}
+          providersLoading={providersQuery.isLoading}
+        />
+      ) : null}
     </React.Fragment>
   );
 }
