@@ -7,6 +7,11 @@ get from zero to a merged pull request.
 If you have questions that aren't answered here, open a GitHub Discussion or
 reach out in the community channels.
 
+> **Note for rphaf:** this is a fork of Buzz. Everything below about setup,
+> tests, code style, and PRs applies unchanged. What differs is naming — user-facing
+> prose uses `rphaf`, per [IDENTITY.md](IDENTITY.md). The code keeps its `buzz`
+> names on purpose ([ROADMAP.md](ROADMAP.md)).
+
 ---
 
 ## Table of Contents

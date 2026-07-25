@@ -4,6 +4,12 @@ This guide is for AI agents contributing to the Buzz codebase. It covers
 agent-specific context and conventions. For general contributor info (setup,
 code style, PR process, architecture), see [CONTRIBUTING.md](CONTRIBUTING.md).
 
+> **This repo is `rphaf`, a fork.** The code is still named `buzz` throughout
+> and that's intentional — see [ROADMAP.md](ROADMAP.md) for why the internal
+> rename is deferred. But anything **user-facing you write** — docs, README
+> prose, UI copy, commit messages — follows [IDENTITY.md](IDENTITY.md): the
+> product noun is `rphaf`, lowercase, and the mark is 🪨.
+
 ---
 
 ## Ecosystem
