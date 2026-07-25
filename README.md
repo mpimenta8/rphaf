@@ -36,9 +36,6 @@ hosting, workflow automation, voice huddles. We've switched all of it off on
 purpose. rphaf is chat first. The rest is still in there, gated behind
 **Settings → Experiments**, waiting until we actually want it.
 
-New here? [IDENTITY.md](IDENTITY.md) explains what "rphaf", "rocpile", and
-"boysch" mean.
-
 ---
 
 ## What it looks like
