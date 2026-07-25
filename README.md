@@ -52,7 +52,7 @@ purpose. rphaf is chat first. The rest is still in there, gated behind
 
 ## Get in
 
-> **Not live yet.** The relay isn't deployed. Ask Matt where things stand.
+> **Not live yet.** The relay isn't deployed. Check the `#rphaf-dev` Slack channel for the latest.
 
 When it is, joining takes three things:
 
@@ -61,7 +61,7 @@ When it is, joining takes three things:
 2. **The relay address.** The app points at `ws://localhost:3000` out of the
    box; you'll change it to ours.
 3. **An invite.** The relay is closed on purpose — membership is an explicit
-   list, not a signup form. Send your npub to Matt and you get added.
+   list, not a signup form. Post your npub in `#rphaf-dev` and you get added.
 
 The app makes you a fresh identity on first launch. Back up the key it gives
 you. Losing it means losing the account, and there's no reset email — that's

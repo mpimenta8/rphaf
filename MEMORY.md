@@ -129,9 +129,9 @@ To **re-enable agents later:** flip the Experiments toggles ON, then run the age
   - Standing constraint for anything outward-facing: **nothing may claim a feature that's gated off or
     a relay that isn't running.** The README's "Not live yet" marker stays until the relay is up.
   - New prose — docs, UI copy, commit messages — follows `IDENTITY.md`. Code keeps its `buzz` names.
-  - Known gaps left open on purpose: the README hardcodes **"Ask Matt"** twice in *Get in* (wrong the
-    first time someone else onboards a friend), and it tells friends the desktop app comes "from this
-    repo" — see the build item below.
+  - *Get in* points at the **`#rphaf-dev` Slack channel** for both relay status and sending your
+    npub — deliberately a channel, not a person, so onboarding doesn't route through one human.
+  - Remaining gap: it tells friends the desktop app comes "from this repo" — see the build item below.
 - **Ship a packaged desktop build — blocks inviting anyone.** The README's *Get in* path assumes a
   build exists; today each friend would have to compile it themselves, which is a non-starter for
   non-developers. **Planned right after the DigitalOcean VM is up.** Upstream's own release flow is in
