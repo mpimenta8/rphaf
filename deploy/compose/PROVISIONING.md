@@ -176,9 +176,17 @@ docker compose version               # expect v2.24.4+
 
 ## 5. Deploy
 
+**Clone over HTTPS, not SSH.** `mpimenta8/rphaf` is public and the VM only ever *reads* (`git pull`
+for `./run.sh upgrade`), so HTTPS needs no credentials at all. Cloning over SSH would mean leaving a
+key on an internet-facing host that can push to the repo — an avoidable blast radius. This is
+independent of what your laptop uses; protocol is per-clone, not a repo-wide setting.
+
+> If the repo ever goes private, don't reach for a normal SSH key here — add a **read-only deploy
+> key** scoped to this repo, so a compromised relay host still can't write to it.
+
 ```bash
 sudo mkdir -p /opt && sudo chown "$USER" /opt
-git clone git@github.com:mpimenta8/rphaf.git /opt/rphaf   # or https://… if no deploy key
+git clone https://github.com/mpimenta8/rphaf.git /opt/rphaf
 cd /opt/rphaf/deploy/compose
 
 ./gen-env.sh --domain chat.rphaf.io --owner <your-64-hex-pubkey>
