@@ -22,12 +22,17 @@ Working notes for humans (and agents) collaborating on this fork. This is a
   `git remote set-url --push upstream DISABLED`.
 - **Keep upstream merges clean:** prefer changes that don't rewrite shared server/Rust files.
 
-### Pushing (use SSH, not HTTPS)
-- `origin` is an **SSH** URL. If it ever reverts to HTTPS, pushes that touch `.github/workflows/*`
-  get **rejected** — a GitHub `gh` OAuth token lacks the `workflow` scope, and workflow-file changes
-  arrive routinely via upstream merges. SSH is not subject to that restriction, so we push over SSH.
-- Fix if you hit it: `git remote set-url origin git@github.com:mpimenta8/rphaf.git` (or, to stay on
-  HTTPS, `gh auth refresh -s workflow`).
+### Pushing (SSH — now actually configured)
+- `origin` is an **SSH** URL, and as of 2026-07-25 SSH auth genuinely works: local
+  `~/.ssh/id_ed25519` is registered on the GitHub account as **`rphaf-dev`**. Before that it was
+  configured but unusable (key never registered), so pushes failed with `Permission denied
+  (publickey)` — and, on a fresh `known_hosts`, `Host key verification failed` first. If the latter
+  recurs, add GitHub's keys from the authoritative source: `curl -s https://api.github.com/meta`
+  → `.ssh_keys`, rather than blindly trusting `ssh-keyscan`.
+- **The original reason for preferring SSH is now stale.** It was "a `gh` OAuth token lacks the
+  `workflow` scope, so HTTPS pushes touching `.github/workflows/*` get rejected" — but the token
+  carries `workflow` (plus `admin:public_key` since registering the key). HTTPS is a perfectly good
+  fallback; SSH is now preference, not necessity.
 - Pre-push hooks run clippy + unit tests (Rust, desktop, Tauri, mobile). **Activate hermit first**
   (`. ./bin/activate-hermit`) or the hooks fail with `just: command not found`.
 
@@ -135,6 +140,16 @@ value warrants it — it's a one-line `DATABASE_URL` swap, not a rebuild.
 - **The stack is fully multi-arch**, so Arm hosts need *no* `compose.yml` changes: `block/buzz:main`
   publishes `amd64`+`arm64` (verified against the GHCR manifest), as do `postgres:17-alpine`,
   `redis:7-alpine`, `minio`, `caddy:2-alpine`.
+- **Clone over HTTPS on the VM, not SSH.** `mpimenta8/rphaf` is **public** and the VM only ever
+  *reads* (`git pull` for `./run.sh upgrade`), so HTTPS needs no credentials — whereas an SSH key on
+  an internet-facing host could push to the repo. Protocol is per-clone, so this is independent of
+  the laptop's SSH origin. If the repo ever goes private, use a **read-only deploy key**, not a
+  normal SSH key.
+- **Rejected: hosting on a friend's Raspberry Pi / Pi-hole box.** Not for lack of specs (a Pi 4/5
+  clears the ~1.2 GB need, and the stack is arm64) but because: SD cards fail under Postgres/MinIO
+  write load (needs a real SSD), and co-locating with Pi-hole means a relay overload takes down
+  *household DNS*. The residential blockers (dynamic IP, CGNAT, ISP-blocked :80/:443, uptime) apply
+  on top. A *dedicated* Pi + SSD + tunnel is a legitimate later migration target.
 - **On a 4 GB box: add 2 GB swap** (cloud VMs ship with none; see `PROVISIONING.md` §3b). Optionally
   cap Redis — it's started with no `maxmemory`, though Buzz only stores *expiring* keys there
   (presence, rate limits, NIP-98 replay), so `volatile-lru` is the safe policy if you bother.
@@ -155,6 +170,13 @@ value warrants it — it's a one-line `DATABASE_URL` swap, not a rebuild.
   cron → restore drill.
 
 ### Key facts / decisions
+- **A fresh `deploy/compose` install was broken until upstream `5e2e132a4` (merged 2026-07-25).**
+  The relay crash-looped under `restart: unless-stopped` with
+  `BUZZ_GIT_PACK_CACHE_PATH=/data/git/.pack-cache could not be created: Permission denied`: Docker
+  only seeds a volume mount point's ownership from the image if that path already exists there, so
+  `/data/git` was created `root:root` while the image runs as `buzz:buzz`. **The fix ships in the
+  image, not our repo** — confirmed live in `ghcr.io/block/buzz:main` at revision `499c5d349`. If
+  that error ever appears, the image is stale: `./run.sh pull`.
 - **The relay image is stock upstream (`ghcr.io/block/buzz:main`) — our fork changes nothing on the
   server.** The whole "just chat" strip-down is *desktop-client* code. So: run the stock relay image,
   and distribute our custom desktop build to friends. No custom relay image to build/publish.
