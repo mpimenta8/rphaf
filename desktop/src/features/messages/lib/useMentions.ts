@@ -24,6 +24,7 @@ import {
   useUsersBatchQuery,
 } from "@/features/profile/hooks";
 import { useIdentityQuery } from "@/shared/api/hooks";
+import { useFeatureEnabled } from "@/shared/features";
 import type { AutocompleteEdit } from "./useRichTextEditor";
 import type {
   AgentPersona,
@@ -41,7 +42,7 @@ import { useDraftMentionRouting } from "./useDraftMentionRouting";
 import { rankMentionCandidates } from "./mentionRanking";
 import { mapMentionCandidateToSuggestion } from "./mentionSuggestionMapping";
 import {
-  buildTeamMentionCandidates,
+  buildMentionSuggestionPool,
   formatTeamMention,
   globalSearchIdentityKey,
   type MentionCandidate,
@@ -93,7 +94,7 @@ export function useMentions(
   const mentionMapRef = React.useRef<Map<string, string>>(new Map());
   const personaMentionMapRef = React.useRef<Map<string, string>>(new Map());
   const previousSuggestionsRef = React.useRef<MentionSuggestion[]>([]);
-  void options?.channelType;
+  const agentsEnabled = useFeatureEnabled("agents");
   const mentionSearchQuery = mentionQuery?.trim() ?? "";
   const canSearchGlobalPeople = mentionSearchQuery.length > 0;
   const identityQuery = useIdentityQuery();
@@ -432,15 +433,14 @@ export function useMentions(
   ]);
 
   const mentionCandidatesWithTeams = React.useMemo(
-    () => [
-      ...mentionCandidates,
-      ...buildTeamMentionCandidates(
-        teamsQuery.data ?? [],
-        personasQuery.data ?? [],
-        mentionCandidates,
-      ),
-    ],
-    [mentionCandidates, personasQuery.data, teamsQuery.data],
+    () =>
+      buildMentionSuggestionPool({
+        agentsEnabled,
+        candidates: mentionCandidates,
+        personas: personasQuery.data ?? [],
+        teams: teamsQuery.data ?? [],
+      }),
+    [agentsEnabled, mentionCandidates, personasQuery.data, teamsQuery.data],
   );
 
   const ownerPubkeys = React.useMemo(
