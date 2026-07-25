@@ -20,11 +20,13 @@ Working notes for humans (and agents) collaborating on this fork. This is a
   `git remote set-url origin git@github.com:mpimenta8/rphaf.git`,
   `git remote add upstream https://github.com/block/buzz.git`,
   `git remote set-url --push upstream DISABLED`.
-- **A fresh clone also needs the README merge driver:** `git config merge.ours.driver true`.
-  `.gitattributes` marks `README.md merge=ours` so upstream merges keep our rewritten README,
-  but the driver config lives in `.git/config` and isn't cloned. Without it, merges that touch
-  the README conflict instead — noisy, not dangerous. Note the driver discards upstream README
-  changes *silently*; `git diff HEAD upstream/main -- README.md` shows what we're skipping.
+- **The README merge driver is set by `just setup`** (`scripts/dev-setup.sh`, beside the
+  `core.hooksPath` line) — no longer a manual step. `.gitattributes` marks `README.md merge=ours`
+  so upstream merges keep our rewritten README, but the driver config lives in `.git/config` and
+  isn't cloned. If you ever skip `just setup`, set it by hand:
+  `git config merge.ours.driver true`. Without it, merges touching the README conflict instead —
+  noisy, not dangerous. Note the driver discards upstream README changes *silently*;
+  `git diff HEAD upstream/main -- README.md` shows what we're skipping.
 - **Keep upstream merges clean:** prefer changes that don't rewrite shared server/Rust files.
 
 ### Pushing (SSH — now actually configured)
@@ -116,16 +118,24 @@ To **re-enable agents later:** flip the Experiments toggles ON, then run the age
 ## Roadmap
 
 - **Fold agents back in** (Experiments toggle + run agent processes).
-- **Brand pass — docs only, ~done 2026-07-25** on branch `rphaf-brand-pass`
+- **Brand pass — docs only, in PR not merged** (2026-07-25). Branch `rphaf-brand-pass` →
+  **[PR #2](https://github.com/mpimenta8/rphaf/pull/2)**, `just ci` green
   (`docs/superpowers/specs/2026-07-25-rphaf-brand-pass-design.md`, `…/plans/…`). Product noun is
   plain **`rphaf`** (no second brand), emoji **🪨** replaces 🐝, README tagline **"Rocpile Hard AF"**.
-  Landed: `IDENTITY.md` (the vocabulary anchor — rphaf/rocpile/boysch, the 🪨 rule, tone; the **only**
+  Contains: `IDENTITY.md` (the vocabulary anchor — rphaf/rocpile/boysch, the 🪨 rule, tone; the **only**
   place the full phrase is spelled out), `ROADMAP.md` (deferred tiers + self-hosting), README rewritten
-  267 → 135 lines, and the `merge=ours` protection above. Scope was documentation only — **no code, no
+  267 → 132 lines, and the `merge=ours` protection above. Scope was documentation only — **no code, no
   app strings, no relay config.**
   - Standing constraint for anything outward-facing: **nothing may claim a feature that's gated off or
     a relay that isn't running.** The README's "Not live yet" marker stays until the relay is up.
   - New prose — docs, UI copy, commit messages — follows `IDENTITY.md`. Code keeps its `buzz` names.
+  - Known gaps left open on purpose: the README hardcodes **"Ask Matt"** twice in *Get in* (wrong the
+    first time someone else onboards a friend), and it tells friends the desktop app comes "from this
+    repo" — see the build item below.
+- **Ship a packaged desktop build — blocks inviting anyone.** The README's *Get in* path assumes a
+  build exists; today each friend would have to compile it themselves, which is a non-starter for
+  non-developers. **Planned right after the DigitalOcean VM is up.** Upstream's own release flow is in
+  `RELEASING.md`; ours needs to produce our gated ("just chat") desktop build, not the stock one.
 - **Rebrand** (deeper tiers, beyond the docs pass) Buzz → rphaf — **[`ROADMAP.md`](ROADMAP.md) is
   canonical**; this is the short version. Tiered: (1) cosmetic strings + relay NIP-11 name
   (`buzz-relay/src/nip11.rs`), (2) app identity (`tauri.conf.json` productName/identifier/deep-link
