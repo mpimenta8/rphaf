@@ -427,21 +427,72 @@ loud failures, useless for the quiet ones. If damage lands on day 0 and nobody n
 every surviving backup already contains it. The monthly tail is what makes a problem discovered in
 month six recoverable, and it costs almost nothing because the data is small.
 
-Create **two** lifecycle rules (Management → Create lifecycle rule):
+**Set these via the CLI, not the console.** The console's rule builder makes it very easy to save an
+expiration without its noncurrent-version counterpart — which, on a versioned bucket, silently means
+nothing is ever deleted (see the warning below). This applies the whole configuration at once, so
+the end state is exactly what's written regardless of what's there now. Run it in **CloudShell**
+(the `>_` icon in the console top bar — already authenticated, nothing to install):
 
-| Rule name | Prefix filter | Action |
-|---|---|---|
-| `expire-dailies` | `relay/daily/` | Expire **current** versions after **30** days |
-| `expire-monthlies` | `relay/monthly/` | Expire **current** versions after **365** days |
+```bash
+cat > /tmp/lifecycle.json <<'EOF'
+{
+  "Rules": [
+    {
+      "ID": "expire-dailies",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "relay/daily/" },
+      "Expiration": { "Days": 30 },
+      "NoncurrentVersionExpiration": { "NoncurrentDays": 7 },
+      "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 7 }
+    },
+    {
+      "ID": "expire-monthlies",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "relay/monthly/" },
+      "Expiration": { "Days": 365 },
+      "NoncurrentVersionExpiration": { "NoncurrentDays": 7 },
+      "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 7 }
+    },
+    {
+      "ID": "clean-delete-markers",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "relay/" },
+      "Expiration": { "ExpiredObjectDeleteMarker": true }
+    }
+  ]
+}
+EOF
 
-Add to **both**: permanently delete **noncurrent** versions after **7** days, and delete **expired
-delete markers** + **incomplete multipart uploads** after **7** days. Those are cheap hygiene — the
-noncurrent rule is near-inert given nothing is overwritten, and the multipart rule stops failed
-large uploads from silently accruing charges forever.
+aws s3api put-bucket-lifecycle-configuration \
+  --bucket rphaf-backup-bucket --lifecycle-configuration file:///tmp/lifecycle.json
+```
+
+> **⚠️ On a versioned bucket, `Expiration` alone deletes nothing.** It inserts a *delete marker* —
+> the object disappears from listings while the bytes become a **noncurrent version** that is stored
+> and billed **forever**. Only `NoncurrentVersionExpiration` reclaims them. This fails in the safe
+> direction (nothing is lost) but silently defeats the cost ceiling, and you'd discover it a year
+> later as an unexplained bill. It is the single easiest thing to get wrong on this page.
+
+`ExpiredObjectDeleteMarker` needs its **own** rule — S3 rejects it in the same `Expiration` block as
+`Days`. And note a daily now takes 30 + 7 = 37 days to vanish permanently; that grace period is
+deliberate.
 
 > **Mind the prefix filter.** A rule with an empty prefix applies to the *whole bucket*, so a
 > 30-day rule with no filter would quietly delete your monthlies too — the exact failure the tiers
-> exist to prevent. Set the prefix on both rules and re-read them once saved.
+> exist to prevent.
+
+**Verify what S3 actually stored**, rather than what the form appeared to accept:
+
+```bash
+aws s3api get-bucket-lifecycle-configuration --bucket rphaf-backup-bucket \
+  --query 'Rules[].{ID:ID,Prefix:Filter.Prefix,Days:Expiration.Days,Noncurrent:NoncurrentVersionExpiration.NoncurrentDays,Status:Status}' \
+  --output table
+```
+
+Check: both tiered rules `Enabled`, each with a **non-empty prefix and no leading slash** (`/relay/…`
+matches nothing — S3 keys don't start with a slash, and a rule matching nothing never expires
+anything), a **`Noncurrent` value present on both**, and 30 on `daily` / 365 on `monthly` rather than
+swapped.
 
 These rules **are** the offsite retention policy. `backup.sh`'s `KEEP_DAYS` prunes only the local
 copy on the VM — nothing in the script ever deletes anything offsite, by design (see §6b).
