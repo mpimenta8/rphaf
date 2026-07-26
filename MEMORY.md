@@ -473,10 +473,25 @@ and can write cross-account into `rphaf-backup-bucket`. Proven by a probe upload
   sudo rights come from cloud-init's `NOPASSWD` rule. Ordinary `sudo <cmd>` works. Unrelated to
   SSH's `PasswordAuthentication no`.
 
-**⚠️ The VM must be on this branch's `backup.sh` before the first real backup.** `main`'s version
-writes to `relay/<TS>/` with no tier, which matches **neither** lifecycle rule — nothing would ever
-expire and there'd be no monthly tail. Tiering (`relay/daily/` … `relay/monthly/`) only exists in
-`offsite-backups-and-restore-drill`.
+**§6e/§6f DONE + §7 RESTORE DRILL PASSED (2026-07-26).** First real backup ran against the live
+stack: `pg_dump` clean, both volumes archived, tier logic correctly chose `monthly/` (622 KB total,
+all `SHA256SUMS` OK, landed at `relay/monthly/20260726-194024Z`). **The restore drill then restored
+it into a throwaway container: 0 errors, 48 events restored vs 48 live — exact match.** This is the
+first time the backup has been proven restorable rather than assumed.
+- **§7 was dangerous until this branch.** It said "use a scratch box" while giving commands that
+  piped the dump into the **running** `postgres` service and untarred over `buzz-prod_*` volumes.
+  Since `backup.sh` dumps with `--clean --if-exists`, following it on the relay host would have
+  dropped every live object. It's now safe by construction — throwaway container, own volume, and
+  the only production command is a read-only `select count(*)`.
+- **Expect `errors: 0` from the restore**, not a few "does not exist" lines — `--if-exists` is
+  precisely what suppresses those. Anything non-zero deserves reading.
+- **The row-count comparison is the step that matters.** An empty restore produces *no errors* and
+  looks identical to a good one; only comparing counts against production distinguishes them.
+
+**⚠️ The VM must be on this branch's `backup.sh`.** `main`'s version writes to `relay/<TS>/` with no
+tier, matching **neither** lifecycle rule — nothing would ever expire and there'd be no monthly
+tail. The VM is currently checked out on `offsite-backups-and-restore-drill`; **return it to `main`
+once that PR merges** (`git checkout main && git pull`).
 
 **AWS access model (as of 2026-07-26) — read before attempting §6.**
 - Matt's access to the relay's account is an **IAM user the friend created**, not root and not his

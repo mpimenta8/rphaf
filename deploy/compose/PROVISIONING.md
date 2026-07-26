@@ -740,8 +740,10 @@ grep -c '^ERROR' /tmp/restore.log     # a few "does not exist" from --if-exists 
 tail -20 /tmp/restore.log
 ```
 
-`--clean --if-exists` emits `ERROR: … does not exist` lines when dropping objects that were never
-there — harmless on an empty target. What matters is that the *data* arrives.
+**Expect `errors: 0`.** `--if-exists` is exactly what stops `DROP` from complaining about objects
+that were never there, so a clean restore into an empty database produces no errors at all — the
+tail should be an unbroken run of `CREATE TABLE` / `COPY` / `ALTER TABLE`. A non-zero count is worth
+reading before you trust the backup.
 
 **d. Prove the data is actually there — compare against production.**
 
@@ -756,6 +758,11 @@ docker compose --env-file .env -f compose.yml exec -T postgres \
 Both `select`s are read-only. The counts should match (or differ by whatever arrived since the
 dump). **A restore that "succeeds" with zero rows is the failure this step exists to catch** — and
 it's invisible in step (c), because an empty restore produces no errors at all.
+
+> **Drill run 2026-07-26, first time, on the live relay:** `errors: 0`, **48 events restored vs 48
+> live** — exact match. Backup set was 622 KB (`postgres.sql.gz` 162 KB, `minio-data.tar.gz` 447 KB,
+> `git-data.tar.gz` 188 B — empty, as expected while the git feature is off). Every `SHA256SUMS`
+> line `OK`. Use these as the shape of a healthy result, not as targets.
 
 **e. Check the media archive lists and extracts.**
 
