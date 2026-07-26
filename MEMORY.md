@@ -220,10 +220,11 @@ value warrants it — it's a one-line `DATABASE_URL` swap, not a rebuild.
   monthly rate; destroying stops the meter immediately). DO invoices **in arrears**, so that lands on
   an invoice around **1 Aug 2026** rather than immediately. Nothing was lost — it never ran the
   relay, only reaching hardening/Docker before the AWS pivot.
-  - **Still to confirm no orphaned DO resources**, which survive a droplet destroy and bill
-    separately: **snapshots** (Images → Snapshots, $0.06/GiB/mo — a 120 GB one is ~$7/mo),
-    **reserved IPs** (Networking — billed *specifically when unattached*, so destroying the droplet
-    is what starts that charge), and **volumes**. Backups were off, so that one should be clear.
+  - **✅ No orphaned DO resources** — snapshots, reserved IPs, block-storage volumes and droplet
+    backups all confirmed empty, so nothing survives to bill. Worth re-checking on any future
+    provider teardown: these all outlive a destroyed VM, and **reserved IPs are charged
+    *specifically when unattached*** — destroying the VM starts that meter rather than stopping it.
+  - **DigitalOcean is fully wound down.** Nothing further expected beyond the $0.23.
 - For reference the droplet was `rphaf-ubuntu-nyc3`, NYC3, Ubuntu
   24.04, IPv4 `68.183.145.188`, $32/mo, and it reached: `buzz` user (sudo, key-only SSH),
   `PermitRootLogin no` + `PasswordAuthentication no` (both verified via `sudo sshd -T`), `ufw` active
