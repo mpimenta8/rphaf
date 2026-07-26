@@ -586,11 +586,39 @@ EOF
 **no key is ever written to disk**. Confirm it works before going further:
 
 ```bash
-rclone lsd offsite:rphaf-backup-bucket     # succeeds (empty listing) = role is wired correctly
+rclone lsd offsite:rphaf-backup-bucket; echo "exit=$?"
 ```
 
-An `AccessDenied` here means §6b or §6c is incomplete — fix it now, not after the first cron run
-fails silently at 03:15.
+> **Read the exit code, not the output.** On an empty bucket a *successful* `lsd` prints **nothing** —
+> indistinguishable at a glance from a command that failed. `exit=0` is the signal.
+
+Then prove it end to end. `lsd` only exercises `ListBucket`; the nightly backup also needs
+`PutObject`, and those are separate grants that fail independently:
+
+```bash
+echo "probe $(date -u)" > /tmp/rphaf-probe.txt
+rclone copy /tmp/rphaf-probe.txt offsite:rphaf-backup-bucket/relay/daily/_probe/
+rclone ls offsite:rphaf-backup-bucket/relay/          # must list the probe file
+```
+
+The probe goes under `relay/daily/` so the 30-day rule disposes of it. **You cannot delete it
+yourself** — the role has no `s3:DeleteObject` (§6b). That's the design working, and it's better to
+meet it here than during an incident.
+
+An `AccessDenied` means §6b or §6c is incomplete — fix it now, not after the first cron run fails at
+03:15. It won't say which half is missing, so work in this order:
+
+```bash
+# 1. Is a role actually attached? (IMDSv2 — an unauthenticated GET returns 401 with an empty
+#    body, so the older token-less one-liner looks identical to "no role".)
+TOKEN=$(curl -sX PUT http://169.254.169.254/latest/api/token \
+  -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+curl -s -H "X-aws-ec2-metadata-token: $TOKEN" \
+  http://169.254.169.254/latest/meta-data/iam/security-credentials/
+#    -> prints the role name, or nothing if none is attached (fix: §6b, Modify IAM role)
+
+# 2. Role attached but denied? Then the bucket policy (§6c) doesn't name that exact role ARN.
+```
 
 ### e. Point the backup at it
 
