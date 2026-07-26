@@ -293,35 +293,165 @@ record you simply never delete.
 ships offsite via [rclone](https://rclone.org). A local-only backup dies with the VM — do the offsite
 part.
 
-**a. Install + configure rclone** for any object store (Backblaze B2 and S3 are cheap; B2 shown):
+### The shape of this, and why
+
+Offsite is **Amazon S3**, in a **different AWS account from the relay**. Three decisions are load-bearing:
+
+| Decision | Why |
+|---|---|
+| S3, not Backblaze/other | `backup.sh` ships a **full** backup nightly, not an incremental. EC2 → S3 **in the same region is free**; anywhere else is metered egress that grows with your media volume. |
+| A **separate AWS account** you own | The relay runs in a friend's personal account on **expiring credits**. Same-account backups die with that account — suspension, closure, or a falling-out takes the relay *and* its only copy at once. Backups are the one thing that must outlive the host account. |
+| Instance role, **no stored key** | The alternative is a long-lived access key sitting in `backup.env` on an internet-facing host. An EC2 instance role gives S3 access with zero stored credentials, rotated by AWS. |
+
+Cost is ~$1–2/month at this scale — not covered by the friend's credits, and deliberately so.
+
+> **Region matters.** The bucket **must** be in the relay's region (`us-east-1`). Same-region
+> transfer is free *even across accounts*; a bucket elsewhere silently puts every nightly full
+> backup on metered inter-region transfer.
+
+### a. In YOUR account: create the bucket
+
+S3 → **Create bucket**, in **`us-east-1`**:
+
+- **Name:** globally unique, e.g. `rphaf-relay-backups` (add a suffix if taken).
+- **Block all public access:** ON (default). Leave it.
+- **Bucket Versioning:** **Enable** — protects against a corrupted object overwriting a good one.
+- **Default encryption:** SSE-S3 (default). Covers the `.env` snapshot at rest without a passphrase
+  you'd have to store off-box.
+- **Object Ownership:** *Bucket owner enforced* (default). This matters for cross-account writes —
+  it makes objects written by the relay owned by **you**, avoiding the classic S3 trap where the
+  writing account keeps ownership and the bucket owner can't read its own backups.
+
+Then add a **Lifecycle rule** (Management → Create lifecycle rule), applying to the whole bucket:
+
+- Expire **current** versions after **30 days**.
+- Permanently delete **noncurrent** versions after **7 days**.
+
+That rule *is* the offsite retention policy. `backup.sh`'s `KEEP_DAYS` only prunes the local copy on
+the VM — nothing in the script ever deletes anything offsite, by design (see the next step).
+
+Note the bucket ARN — `arn:aws:s3:::rphaf-relay-backups` — you'll need it twice below.
+
+### b. In the RELAY's account: an instance role that can write but not delete
+
+IAM → **Roles** → Create role → **AWS service** → **EC2** → name it `rphaf-relay-backup`. Attach an
+inline policy (substitute your bucket name):
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    { "Effect": "Allow", "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::rphaf-relay-backups" },
+    { "Effect": "Allow", "Action": ["s3:PutObject", "s3:GetObject"],
+      "Resource": "arn:aws:s3:::rphaf-relay-backups/*" }
+  ]
+}
+```
+
+**`s3:DeleteObject` is deliberately absent.** Every run writes to a fresh timestamped prefix, so
+`rclone copy` never deletes — and a compromised relay host therefore cannot destroy backup history.
+Retention lives with the lifecycle rule in your account, where the relay can't reach it. `GetObject`
+is there only so rclone can compare sizes/hashes and skip re-uploads.
+
+Attach it to the instance: EC2 → Instances → `rphaf-relay` → **Actions → Security → Modify IAM
+role**. Takes effect immediately; no reboot, no restart.
+
+### c. Back in YOUR account: allow that role in
+
+S3 → your bucket → **Permissions → Bucket policy**. Substitute the relay account ID:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": { "AWS": "arn:aws:iam::<RELAY_ACCOUNT_ID>:role/rphaf-relay-backup" },
+    "Action": ["s3:ListBucket", "s3:PutObject", "s3:GetObject"],
+    "Resource": [
+      "arn:aws:s3:::rphaf-relay-backups",
+      "arn:aws:s3:::rphaf-relay-backups/*"
+    ]
+  }]
+}
+```
+
+Cross-account access needs **both** sides to agree: the identity policy in §6b *and* this bucket
+policy. Granting only one silently fails with `AccessDenied` — that's the usual reason a
+cross-account setup "should work" but doesn't.
+
+### d. On the VM: rclone against the instance role
 
 ```bash
 sudo -v ; curl https://rclone.org/install.sh | sudo bash
-rclone config      # create a remote, e.g. name it "offsite" (B2/S3/etc.)
+
+mkdir -p ~/.config/rclone
+cat > ~/.config/rclone/rclone.conf <<'EOF'
+[offsite]
+type = s3
+provider = AWS
+env_auth = true
+region = us-east-1
+EOF
 ```
 
-**b. Point the backup at it** via `backup.env` (keeps secrets out of the crontab):
+`env_auth = true` is the whole point: rclone picks up credentials from EC2 instance metadata, so
+**no key is ever written to disk**. Confirm it works before going further:
+
+```bash
+rclone lsd offsite:rphaf-relay-backups     # succeeds (empty listing) = role is wired correctly
+```
+
+An `AccessDenied` here means §6b or §6c is incomplete — fix it now, not after the first cron run
+fails silently at 03:15.
+
+### e. Point the backup at it
 
 ```bash
 cd /opt/rphaf/deploy/compose
 cat > backup.env <<'EOF'
-BACKUP_RCLONE_REMOTE=offsite:my-bucket/buzz
+BACKUP_RCLONE_REMOTE=offsite:rphaf-relay-backups/relay
 KEEP_DAYS=14
 EOF
 chmod 600 backup.env      # backup.env is gitignored (see root .gitignore) — won't be committed
 ```
 
-**c. Test it once by hand**, then schedule it:
+`KEEP_DAYS` governs **local** rotation only. Offsite retention is the lifecycle rule from §6a.
+
+### f. Test by hand, then schedule
 
 ```bash
 sudo mkdir -p /var/backups/buzz && sudo chown "$USER" /var/backups/buzz
 ./backup.sh                       # watch it dump, archive, ship offsite
+rclone ls offsite:rphaf-relay-backups/relay   # confirm the objects actually landed
 crontab -e
 # add (nightly 03:15 UTC):
 15 3 * * * cd /opt/rphaf/deploy/compose && ./backup.sh >> /var/log/buzz-backup.log 2>&1
 ```
 
 Make the log writable: `sudo touch /var/log/buzz-backup.log && sudo chown "$USER" /var/log/buzz-backup.log`.
+
+> Don't stop at "the first run worked." A backup job that breaks in month three fails **silently** —
+> cron mails nobody and the log is only read by people who already suspect a problem. Wire the
+> failure alert in §6g, then do the restore drill in §7.
+
+### g. Alert on failure
+
+`backup.sh` supports an optional `BACKUP_ALERT_CMD`, run only when a backup fails. The cheapest
+useful target is the same **SNS topic** you'll use for the billing alarm — one topic, one email
+subscription, both classes of "you need to know this" arriving the same way.
+
+Create the topic once (in the relay's account), subscribe your email, confirm the subscription mail,
+then add `sns:Publish` for that topic ARN to the `rphaf-relay-backup` role from §6b and:
+
+```bash
+# append to backup.env
+BACKUP_ALERT_CMD=aws sns publish --region us-east-1 --topic-arn arn:aws:sns:us-east-1:<RELAY_ACCOUNT_ID>:rphaf-alerts --subject "rphaf backup FAILED" --message
+```
+
+Requires the AWS CLI on the VM (`sudo snap install aws-cli --classic`). If you'd rather not install
+it, any command taking a message as its final argument works — a [healthchecks.io](https://healthchecks.io)
+`curl` is a fine substitute.
 
 ## 7. Restore drill (a backup you haven't restored isn't a backup)
 

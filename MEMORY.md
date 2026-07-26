@@ -397,10 +397,42 @@ BUZZ_COMPOSE_TLS=true ./run.sh start
 
 ### Backups (day one, non-negotiable)
 `deploy/compose/backup.sh` does it: `pg_dump` + MinIO/git volume tars + `.env` snapshot + local
-rotation + optional offsite via rclone (`BACKUP_RCLONE_REMOTE`, e.g. in a gitignored `backup.env`).
+rotation + offsite via rclone (`BACKUP_RCLONE_REMOTE`, in a gitignored `backup.env`).
 Schedule it nightly via cron. A local-only backup dies with the VM — **set the offsite target.**
 `./run.sh backup-hint` prints the full checklist. **A backup you haven't restore-tested isn't a
 backup** — do the restore drill once (see `PROVISIONING.md` §7).
+
+**Offsite target: S3 in Matt's OWN AWS account — settled 2026-07-25.** Full runbook is
+`PROVISIONING.md` §6. Backblaze B2 was considered and rejected. The reasoning, so nobody reopens it:
+- **S3 over B2 — because of egress, not credits.** `backup.sh` ships a **full** backup nightly (fresh
+  timestamped prefix, never incremental). EC2 → S3 **same-region is free**; any other provider meters
+  that egress and the bill grows with the media volume. At ~$1–2/mo the credits argument that drove
+  the relay to AWS is *irrelevant* here — this was decided on egress and credential handling.
+- **A separate account from the relay — this is the important half.** The relay lives in a friend's
+  personal account on **expiring credits**; `docs/threat-model.md` notes credits running out arrives
+  as an outage, not a warning. Same-account backups die with that account (suspension, closure,
+  falling-out) — the exact failure offsite backups exist to survive. Ownership dilution is a non-issue
+  for the relay (MEMORY says so above) but backups are the exception: they must outlive it.
+- **Instance role, no stored key.** rclone `env_auth = true` reads EC2 instance metadata, so **no
+  credential is ever written to the relay host** — strictly better than B2's keyID/applicationKey in
+  `backup.env`. Cross-account needs **both** the role's identity policy *and* the bucket policy;
+  granting one silently `AccessDenied`s.
+- **The role gets no `s3:DeleteObject`.** Nightly runs write to fresh prefixes, so `rclone copy`
+  never deletes — a compromised relay host cannot destroy backup history. **Offsite retention is a
+  bucket lifecycle rule** in Matt's account; `KEEP_DAYS` in `backup.env` prunes only the local copy.
+  Don't "fix" the script by adding offsite pruning — that's the property, not a gap.
+- **Bucket must be `us-east-1`** (relay's region). Same-region transfer is free *across accounts*;
+  elsewhere silently reintroduces metered transfer. Also set *Bucket owner enforced* so cross-account
+  writes are owned by the bucket owner — otherwise you can't read your own backups.
+- SSE-S3 at rest covers the `.env` snapshot without an rclone-`crypt` passphrase, which would
+  otherwise have to live off-box or be lost with the VM it protects.
+
+**`backup.sh` hardening (same change):** `BACKUP_ALERT_CMD` fires once on failure (an EXIT trap
+catches aborts that bypass `die`; a `REPORTED` flag prevents double-reporting); `tar` exit 1 (files
+changed mid-archive) is a warning while 2+ is fatal, instead of the old blanket `|| log "skipped"`
+that let a failed media archive report success; a `LAST_SUCCESS` marker in `BACKUP_DIR` lets you
+detect a run that *never happened* (broken crontab), which alerting alone can't. Remember **no shell
+script is linted anywhere** — these were hand-verified by running every failure path.
 
 ### Managed-Postgres later (the escape hatch)
 Point `DATABASE_URL` at a managed DB and delete the `postgres` service + its `depends_on` in

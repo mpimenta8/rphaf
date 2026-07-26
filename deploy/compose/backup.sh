@@ -14,8 +14,15 @@
 #
 # Run from deploy/compose. Configure via env or an optional ./backup.env:
 #   BACKUP_DIR            where to write locally      (default /var/backups/buzz)
-#   KEEP_DAYS             local retention in days     (default 14)
+#   KEEP_DAYS             LOCAL retention in days     (default 14)
 #   BACKUP_RCLONE_REMOTE  rclone remote:path offsite  (default empty = local only)
+#   BACKUP_ALERT_CMD      command run on failure      (default empty = no alerting)
+#                         Invoked as: $BACKUP_ALERT_CMD "<message>"
+#
+# KEEP_DAYS prunes only the LOCAL copies. Nothing here ever deletes anything
+# offsite — that is deliberate, so a compromised relay host cannot destroy
+# backup history. Set offsite retention with a bucket lifecycle rule instead
+# (see PROVISIONING.md §6a).
 #
 # Cron example (nightly 03:15 UTC):
 #   15 3 * * * cd /opt/rphaf/deploy/compose && ./backup.sh >> /var/log/buzz-backup.log 2>&1
@@ -29,10 +36,38 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/buzz}"
 KEEP_DAYS="${KEEP_DAYS:-14}"
 RCLONE_REMOTE="${BACKUP_RCLONE_REMOTE:-}"
+ALERT_CMD="${BACKUP_ALERT_CMD:-}"
 COMPOSE=(docker compose --env-file .env -f compose.yml)
 
 log() { printf '[buzz-backup %s] %s\n' "$(date -u +%H:%M:%SZ)" "$*"; }
-die() { log "ERROR: $*" >&2; exit 1; }
+
+# REPORTED doubles as "this run's failure has already been announced", so `die`
+# and the EXIT trap can't both alert (or both log) for the same failure.
+REPORTED=0
+alert() {
+  local out
+  [[ "$REPORTED" -eq 1 ]] && return 0
+  REPORTED=1
+  [[ -n "$ALERT_CMD" ]] || return 0
+  # Unquoted on purpose: ALERT_CMD is a command line, not a single word.
+  # shellcheck disable=SC2086
+  if ! out="$($ALERT_CMD "rphaf backup FAILED on $(hostname -s): $1" 2>&1)"; then
+    log "WARNING: BACKUP_ALERT_CMD itself failed — this failure went unreported: ${out}"
+  fi
+}
+
+die() { log "ERROR: $*" >&2; alert "$*"; exit 1; }
+
+# Catch anything `set -e` aborts on that didn't route through `die`. A backup
+# job that dies quietly is worse than no backup — you find out at restore time.
+on_exit() {
+  local rc=$?
+  [[ "$rc" -eq 0 ]] && return 0
+  [[ "$REPORTED" -eq 1 ]] && return 0   # die() already said what went wrong
+  log "ERROR: aborted unexpectedly (exit ${rc})"
+  alert "aborted unexpectedly (exit ${rc})"
+}
+trap on_exit EXIT
 
 [[ -f .env ]] || die "no .env here — run from deploy/compose on the deploy host"
 command -v docker >/dev/null || die "docker not found"
@@ -53,13 +88,22 @@ log "dumping postgres…"
 
 # --- 2. Volume tars (media + git) from a throwaway alpine container. --------
 tar_volume() {
-  local pattern="$1" out="$2" vol
+  local pattern="$1" out="$2" vol rc=0
   vol="$(docker volume ls --format '{{.Name}}' | grep -E "$pattern" | head -1 || true)"
-  if [[ -z "$vol" ]]; then log "  no volume matching /$pattern/ — skipping ${out}"; return; fi
+  if [[ -z "$vol" ]]; then
+    log "  WARNING: no volume matching /$pattern/ — ${out} NOT backed up"
+    return
+  fi
   log "archiving volume ${vol} -> ${out}…"
   docker run --rm -v "${vol}:/data:ro" -v "${DEST}:/backup" alpine \
-    tar czf "/backup/${out}" -C /data . 2>/dev/null \
-    || log "  (${vol} empty or unreadable — skipped)"
+    tar czf "/backup/${out}" -C /data . || rc=$?
+  # tar: 0 = clean, 1 = files changed underneath us (expected on a live volume,
+  # archive is still usable), 2+ = genuinely broken. Only the last is fatal.
+  case "$rc" in
+    0) ;;
+    1) log "  WARNING: files changed while archiving ${vol} — archive kept, may be slightly inconsistent" ;;
+    *) die "failed to archive volume ${vol} (tar exit ${rc}) — refusing to report a partial backup as success" ;;
+  esac
 }
 tar_volume 'buzz.*minio-data$' minio-data.tar.gz
 tar_volume 'buzz.*git-data$'   git-data.tar.gz
@@ -83,7 +127,14 @@ else
   log "         A local-only backup dies with the VM — configure offsite."
 fi
 
-# --- 6. Rotate local copies. -----------------------------------------------
+# --- 6. Rotate LOCAL copies only. ------------------------------------------
+# Offsite retention is a bucket lifecycle rule (PROVISIONING.md §6a) — this
+# script has no delete permission offsite and must not gain one.
 log "pruning local backups older than ${KEEP_DAYS} day(s)…"
 find "$BACKUP_DIR" -mindepth 1 -maxdepth 1 -type d -mtime "+${KEEP_DAYS}" -exec rm -rf {} +
+
+# --- 7. Success marker. -----------------------------------------------------
+# Alerting covers a run that fails; it cannot cover a run that never happened
+# (broken crontab, stopped VM). Check this file's age to catch that.
+date -u +%Y-%m-%dT%H:%M:%SZ > "${BACKUP_DIR}/LAST_SUCCESS"
 log "done."
