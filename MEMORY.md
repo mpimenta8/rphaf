@@ -215,8 +215,16 @@ value warrants it — it's a one-line `DATABASE_URL` swap, not a rebuild.
   - `t4g` is **burstable** (CPU credits, "unlimited" mode on by default) — irrelevant for an idle
     chat relay, but it's where surprise CPU charges would come from. Set a **billing alarm anyway**,
     so credits running out arrives as an alert rather than an invoice.
-- **The DO droplet stays alive until the relay is verified on EC2**, then gets cancelled before the
-  next billing date — it's the rollback. For reference it was `rphaf-ubuntu-nyc3`, NYC3, Ubuntu
+- **✅ The DO droplet was DESTROYED 2026-07-26** — the rollback is gone, which is fine now that
+  backups are live and restore-tested. Total accrued cost **$0.23** (DO bills hourly, capped at the
+  monthly rate; destroying stops the meter immediately). DO invoices **in arrears**, so that lands on
+  an invoice around **1 Aug 2026** rather than immediately. Nothing was lost — it never ran the
+  relay, only reaching hardening/Docker before the AWS pivot.
+  - **Still to confirm no orphaned DO resources**, which survive a droplet destroy and bill
+    separately: **snapshots** (Images → Snapshots, $0.06/GiB/mo — a 120 GB one is ~$7/mo),
+    **reserved IPs** (Networking — billed *specifically when unattached*, so destroying the droplet
+    is what starts that charge), and **volumes**. Backups were off, so that one should be clear.
+- For reference the droplet was `rphaf-ubuntu-nyc3`, NYC3, Ubuntu
   24.04, IPv4 `68.183.145.188`, $32/mo, and it reached: `buzz` user (sudo, key-only SSH),
   `PermitRootLogin no` + `PasswordAuthentication no` (both verified via `sudo sshd -T`), `ufw` active
   with default-deny and only 22/80/443 open (v4 **and** v6), 2 GB swap at `vm.swappiness=10`, Docker
@@ -224,8 +232,8 @@ value warrants it — it's a one-line `DATABASE_URL` swap, not a rebuild.
   which is the datapoint that says 4 GB is right-sized. **None of that work is wasted:**
   `PROVISIONING.md` §2–§4 are provider-agnostic and port to EC2 nearly unchanged.
 - **`PROVISIONING.md` is now AWS-first (done 2026-07-26).** §0–§2 rewritten for EC2; DO kept as
-  collapsed `<details>` fallbacks rather than deleted, since it's still the rollback until the
-  droplet is cancelled. Corrections worth knowing: **§0 is self-serve** (Route 53 is in the account
+  collapsed `<details>` fallbacks rather than deleted — kept as a documented provider alternative
+  (the droplet itself is now destroyed, so they're reference, not rollback). Corrections worth knowing: **§0 is self-serve** (Route 53 is in the account
   we can reach — the old "message to send the domain owner" framing was wrong and cost a
   round-trip); **§2 is explicitly a no-op on AWS** and now says so in its heading, because it used to
   walk you through an SSH-lockout risk to reach a state Canonical's AMI already ships. New §3c
