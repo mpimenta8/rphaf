@@ -764,7 +764,10 @@ echo "$BACKUP_ALERT_CMD"      # must print the whole command — if it prints "a
 $BACKUP_ALERT_CMD "test alert - rphaf alerting setup, ignore"
 ```
 
-An email should arrive within seconds.
+An email should arrive shortly — but **give it several minutes before concluding anything is
+broken.** Gmail in particular will sit on SNS mail and then deliver a batch at once (observed
+2026-07-26: two test alerts arrived together, minutes after the second was sent). Don't start
+changing configuration during that window; you'll "fix" a system that was already working.
 
 > **A returned `MessageId` proves acceptance, not delivery.** SNS accepts the publish and returns an
 > ID even when the only subscription is unconfirmed — it then silently discards the message. So a

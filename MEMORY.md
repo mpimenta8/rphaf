@@ -524,9 +524,23 @@ the relay account is an IAM user, so that route is blocked there. Budgets needs 
 you directly without an SNS topic, and alerts on **forecast** as well as actual, which warns before
 the credits are gone rather than after. Thresholds: **~$10** relay account (credits expiring,
 burstable CPU), **~$5** own account (backup storage). Alert at 85% actual + 100% forecast.
-**§6g alerting is still dormant** — `BACKUP_ALERT_CMD` is unset, so a failed backup currently tells
-nobody; and it can never catch a run that *never happened* (see §6h's `LAST_SUCCESS` / CloudWatch
-`PutRequests` alarm).
+**✅ §6g alerting is LIVE and verified (2026-07-26)** — SNS topic `rphaf-alerts` in the relay
+account, email subscription confirmed, `sns:Publish` added to the `rphaf-relay-backup` role, and a
+test publish actually reached the inbox. A failed backup now tells someone.
+- **`BACKUP_ALERT_CMD` must be quoted in `backup.env`, with no spaces inside any argument.**
+  Unquoted, `BACKUP_ALERT_CMD=aws sns publish …` is an *assignment prefix* — bash runs `sns` and
+  never sets the variable (`Command 'sns' not found`). And since `backup.sh` expands it unquoted so
+  it word-splits, quotes *within* the value aren't re-parsed: `--subject "rphaf backup FAILED"`
+  arrives as 4 args with literal quotes. Hence `--subject rphaf-backup-FAILED`. Both constraints are
+  in `backup.sh`'s header now.
+- **A returned `MessageId` proves acceptance, not delivery** — SNS accepts and silently discards to
+  an unconfirmed subscription. Check status in the **console** (SNS → Topics → Subscriptions); the
+  role holds only `sns:Publish`, so `list-subscriptions-by-topic`/`subscribe` correctly fail from
+  the VM. Don't widen the role for a diagnostic.
+- **Gmail batches SNS mail** — two test alerts arrived together, minutes late. Wait before
+  concluding it's broken; the setup was fine the whole time.
+- Still true: `BACKUP_ALERT_CMD` fires only on *failure* and can never catch a run that **never
+  happened** — see §6h (`LAST_SUCCESS`, or a CloudWatch alarm on the bucket's `PutRequests`).
 
 **AWS access model (as of 2026-07-26) — read before attempting §6.**
 - Matt's access to the relay's account is an **IAM user the friend created**, not root and not his
