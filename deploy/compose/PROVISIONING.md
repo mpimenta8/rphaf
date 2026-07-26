@@ -764,8 +764,21 @@ echo "$BACKUP_ALERT_CMD"      # must print the whole command — if it prints "a
 $BACKUP_ALERT_CMD "test alert - rphaf alerting setup, ignore"
 ```
 
-An email should arrive within seconds. Nothing arriving means the subscription is unconfirmed (step
-2) or the role lacks `sns:Publish` (step 3).
+An email should arrive within seconds.
+
+> **A returned `MessageId` proves acceptance, not delivery.** SNS accepts the publish and returns an
+> ID even when the only subscription is unconfirmed — it then silently discards the message. So a
+> successful-looking test is exactly what a broken setup produces.
+
+Nothing arriving means the subscription is unconfirmed (step 2) or, less likely given the publish
+succeeded, the role lacks `sns:Publish` (step 3). **Check the status in the console**, not from the
+VM: SNS → Topics → `rphaf-alerts` → **Subscriptions** tab → **Status** column. The role deliberately
+has only `sns:Publish`, so `aws sns list-subscriptions-by-topic` and `aws sns subscribe` both fail
+with `AuthorizationError` from the relay host — that's least privilege working, not a
+misconfiguration. Don't widen the role for a one-off diagnostic.
+
+If it shows **Pending confirmation**, select the subscription → **Request confirmation** to resend,
+and check spam for mail from `no-reply@sns.amazonaws.com`.
 
 > **Prefer no AWS CLI?** Any command taking the message as its final argument works — a
 > [healthchecks.io](https://healthchecks.io) `curl` is a fine substitute, and has the advantage of
