@@ -651,12 +651,50 @@ sudo mkdir -p /var/backups/buzz && sudo chown "$USER" /var/backups/buzz
 ./backup.sh                       # watch it dump, archive, ship offsite
 rclone lsf offsite:rphaf-backup-bucket/relay/            # expect: monthly/ (first run of the month)
 rclone ls  offsite:rphaf-backup-bucket/relay             # confirm the objects actually landed
-crontab -e
-# add (nightly 03:15 UTC):
-15 3 * * * cd /opt/rphaf/deploy/compose && ./backup.sh >> /var/log/buzz-backup.log 2>&1
 ```
 
-Make the log writable: `sudo touch /var/log/buzz-backup.log && sudo chown "$USER" /var/log/buzz-backup.log`.
+Make the log writable, then install the schedule **without hand-editing**:
+
+```bash
+sudo touch /var/log/buzz-backup.log && sudo chown "$USER" /var/log/buzz-backup.log
+
+( crontab -l 2>/dev/null | grep -v 'backup\.sh' ; \
+  echo '15 3 * * * cd /opt/rphaf/deploy/compose && ./backup.sh >> /var/log/buzz-backup.log 2>&1' \
+) | crontab -
+
+crontab -l | tail -1 | cat -A      # must end exactly: ...2>&1$
+```
+
+> **Don't paste the line into `crontab -e`.** On an empty crontab it lands above the default comment
+> header **without a trailing newline**, gluing the header onto your command:
+> `… 2>&1# Edit this file to introduce tasks…`. Cron honours `#` only at the *start* of a line, so
+> the shell reads the redirect target as `1#` — an invalid descriptor, the redirection fails, and
+> `backup.sh` never runs. It fails **silently**, because cron mails the error to a local user on a
+> box with no MTA. `echo` supplies the newline; `cat -A` renders the line ending (`$`) so you can
+> see it's clean.
+
+**Prove cron actually runs it**, rather than assuming — its environment is minimal and differs from
+your login shell:
+
+```bash
+# one-off run 3 minutes from now, alongside the real entry
+( crontab -l ; echo "$(date -u -d '+3 minutes' '+%M %H') * * * cd /opt/rphaf/deploy/compose && ./backup.sh >> /var/log/buzz-backup.log 2>&1" ) | crontab -
+
+# wait ~4 minutes, then:
+cat /var/log/buzz-backup.log
+cat /var/backups/buzz/LAST_SUCCESS
+rclone lsf offsite:rphaf-backup-bucket/relay/daily/     # a new timestamped dir
+
+# remove the one-off
+( crontab -l | grep -v "$(date -u -d '+3 minutes' '+%M %H')" ) | crontab -
+```
+
+This also exercises the **`daily/`** branch of the tier logic for the first time — every earlier run
+goes to `monthly/`, so without this the path that runs 30 nights out of 31 stays untested.
+
+> **Verified 2026-07-26:** the scheduled run fired on time, chose `daily/` correctly (July's monthly
+> already existed), and shipped offsite. Cron's `PATH` found `docker` and `rclone` unaided, so no
+> `PATH` line is needed in `backup.sh`.
 
 > Don't stop at "the first run worked." A backup job that breaks in month three fails **silently** —
 > cron mails nobody and the log is only read by people who already suspect a problem. Wire the

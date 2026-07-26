@@ -488,6 +488,24 @@ first time the backup has been proven restorable rather than assumed.
 - **The row-count comparison is the step that matters.** An empty restore produces *no errors* and
   looks identical to a good one; only comparing counts against production distinguishes them.
 
+**Cron scheduling trap (hit 2026-07-26).** Pasting the schedule line into an empty `crontab -e`
+put it at the *top* of the file with **no trailing newline**, so cron's default comment header glued
+onto the command: `… 2>&1# Edit this file to introduce tasks…`. Cron only honours `#` at the start
+of a line, so the shell saw the redirect target as `1#` — invalid fd, redirection fails,
+`backup.sh` never runs. It fails **silently**: cron mails the error to the local user and there's no
+MTA, so nothing surfaces. Only the stale `LAST_SUCCESS` marker would have caught it. Install the
+entry deterministically instead of editing by hand:
+`( crontab -l 2>/dev/null | grep -v 'backup\.sh' ; echo '15 3 * * * cd /opt/rphaf/deploy/compose && ./backup.sh >> /var/log/buzz-backup.log 2>&1' ) | crontab -`
+then verify with `crontab -l | tail -1 | cat -A` (must end `2>&1$`). §6f now documents the piped
+form and warns off `crontab -e`.
+
+**✅ NIGHTLY BACKUPS ARE LIVE AND CRON-VERIFIED (2026-07-26).** A one-off scheduled run fired on
+time, correctly chose the **`daily/`** tier (July's monthly already existed), and shipped offsite —
+so the branch that runs 30 nights in 31 is exercised, not just the monthly path. **Cron's minimal
+`PATH` found `docker` and `rclone` unaided**, so no `PATH` line is needed in `backup.sh`. Schedule
+is `15 3 * * *` (03:15 UTC); log at `/var/log/buzz-backup.log`; marker at
+`/var/backups/buzz/LAST_SUCCESS`. Every code path in `backup.sh` has now run for real.
+
 **⚠️ The VM must be on this branch's `backup.sh`.** `main`'s version writes to `relay/<TS>/` with no
 tier, matching **neither** lifecycle rule — nothing would ever expire and there'd be no monthly
 tail. The VM is currently checked out on `offsite-backups-and-restore-drill`; **return it to `main`
