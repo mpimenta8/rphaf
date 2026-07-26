@@ -570,8 +570,17 @@ type = s3
 provider = AWS
 env_auth = true
 region = us-east-1
+no_check_bucket = true
 EOF
 ```
+
+> **`no_check_bucket = true` is required, not tuning.** Before uploading, rclone verifies the
+> destination bucket exists and **tries to create it** if that check fails. The §6b role has no
+> `s3:CreateBucket`, so without this line every upload dies with
+> `AccessDenied … s3:CreateBucket` *before* it ever attempts `PutObject` — while `lsd` keeps
+> working, because listing never triggers the check. Do not "fix" this by granting `CreateBucket`:
+> that would let a compromised relay host create buckets in your account, to satisfy a check we
+> don't need.
 
 > **If `sudo` asks for a password here, nothing is wrong.** The `ubuntu` account's password is
 > **locked by design** — its sudo rights come from cloud-init's `NOPASSWD` rule in

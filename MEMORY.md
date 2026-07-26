@@ -448,6 +448,11 @@ backup** — do the restore drill once (see `PROVISIONING.md` §7).
   via `put-bucket-lifecycle-configuration` (CloudShell), not by clicking**, and verify with the
   `get-` call — the runbook now does both.
 - `ExpiredObjectDeleteMarker` cannot share an `Expiration` block with `Days`; it needs its own rule.
+- **rclone needs `no_check_bucket = true` against this least-privilege role.** Before uploading it
+  verifies the bucket exists and **tries to create it** on failure; with no `s3:CreateBucket` every
+  upload dies `AccessDenied … s3:CreateBucket` *before* reaching `PutObject`. `rclone lsd` keeps
+  succeeding throughout, because listing never triggers the check — so **`lsd` alone is a false
+  green light**, and only a probe upload proves the path. Don't grant `CreateBucket` to fix it.
 - **Retention is two-tier on purpose.** A flat 30 days only answers loud failures (dead VM, deleted
   channel). Damage noticed on day 37 would already be in every surviving backup — hence the 12-month
   `monthly/` tail. `backup.sh` picks the tier by "no monthly exists for this year-month yet" rather
