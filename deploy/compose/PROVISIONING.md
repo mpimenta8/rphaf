@@ -403,20 +403,59 @@ S3 → **Create bucket**, in **`us-east-1`**:
 
 - **Name:** globally unique, e.g. `rphaf-relay-backups` (add a suffix if taken).
 - **Block all public access:** ON (default). Leave it.
-- **Bucket Versioning:** **Enable** — protects against a corrupted object overwriting a good one.
+- **Bucket Versioning:** **Enable** — a delete becomes a recoverable *delete marker* rather than
+  destruction. (Note it does little against *overwrites* here: `backup.sh` writes every run to a
+  fresh timestamped prefix, so nothing is ever overwritten in the first place.)
 - **Default encryption:** SSE-S3 (default). Covers the `.env` snapshot at rest without a passphrase
   you'd have to store off-box.
 - **Object Ownership:** *Bucket owner enforced* (default). This matters for cross-account writes —
   it makes objects written by the relay owned by **you**, avoiding the classic S3 trap where the
   writing account keeps ownership and the bucket owner can't read its own backups.
 
-Then add a **Lifecycle rule** (Management → Create lifecycle rule), applying to the whole bucket:
+### Retention: two tiers, not one
 
-- Expire **current** versions after **30 days**.
-- Permanently delete **noncurrent** versions after **7 days**.
+`backup.sh` files each run under `daily/` or `monthly/` (the first successful run of each calendar
+month becomes that month's monthly). Retention differs per tier, which is the whole point:
 
-That rule *is* the offsite retention policy. `backup.sh`'s `KEEP_DAYS` only prunes the local copy on
-the VM — nothing in the script ever deletes anything offsite, by design (see the next step).
+| Prefix | Keep | Answers |
+|---|---|---|
+| `relay/daily/` | **30 days** | "restore last night" — VM died, disk failed, someone deleted a channel |
+| `relay/monthly/` | **365 days** | "this data was quietly wrong months ago" — a bad migration, a bug that dropped events, a compromise with long dwell time |
+
+**Why a flat 30 days is not enough.** At any moment you'd hold the last 30 nights — fine for the
+loud failures, useless for the quiet ones. If damage lands on day 0 and nobody notices until day 37,
+every surviving backup already contains it. The monthly tail is what makes a problem discovered in
+month six recoverable, and it costs almost nothing because the data is small.
+
+Create **two** lifecycle rules (Management → Create lifecycle rule):
+
+| Rule name | Prefix filter | Action |
+|---|---|---|
+| `expire-dailies` | `relay/daily/` | Expire **current** versions after **30** days |
+| `expire-monthlies` | `relay/monthly/` | Expire **current** versions after **365** days |
+
+Add to **both**: permanently delete **noncurrent** versions after **7** days, and delete **expired
+delete markers** + **incomplete multipart uploads** after **7** days. Those are cheap hygiene — the
+noncurrent rule is near-inert given nothing is overwritten, and the multipart rule stops failed
+large uploads from silently accruing charges forever.
+
+> **Mind the prefix filter.** A rule with an empty prefix applies to the *whole bucket*, so a
+> 30-day rule with no filter would quietly delete your monthlies too — the exact failure the tiers
+> exist to prevent. Set the prefix on both rules and re-read them once saved.
+
+These rules **are** the offsite retention policy. `backup.sh`'s `KEEP_DAYS` prunes only the local
+copy on the VM — nothing in the script ever deletes anything offsite, by design (see §6b).
+
+### Cost, and the one thing that would change it
+
+Roughly `(30 + 12) × <nightly size> × $0.023/GB` per month — so a 500 MB nightly set is about
+**$0.50/month**, and 5 GB is about **$5**.
+
+> **The scaling trap:** these are **full** backups, not incrementals, so cost is retention ×
+> dataset. That's irrelevant at friend-group scale, but if shared media ever grows into tens of GB,
+> revisit this before the bill does — either shorten the daily tier, transition `monthly/` to
+> Glacier Instant Retrieval via a lifecycle *transition* rule, or move to incrementals
+> (`restic`/`borg`) instead of `rclone copy`.
 
 Note the bucket ARN — `arn:aws:s3:::rphaf-relay-backups` — you'll need it twice below.
 
@@ -511,7 +550,8 @@ chmod 600 backup.env      # backup.env is gitignored (see root .gitignore) — w
 ```bash
 sudo mkdir -p /var/backups/buzz && sudo chown "$USER" /var/backups/buzz
 ./backup.sh                       # watch it dump, archive, ship offsite
-rclone ls offsite:rphaf-relay-backups/relay   # confirm the objects actually landed
+rclone lsf offsite:rphaf-relay-backups/relay/            # expect: monthly/ (first run of the month)
+rclone ls  offsite:rphaf-relay-backups/relay             # confirm the objects actually landed
 crontab -e
 # add (nightly 03:15 UTC):
 15 3 * * * cd /opt/rphaf/deploy/compose && ./backup.sh >> /var/log/buzz-backup.log 2>&1
@@ -540,6 +580,22 @@ BACKUP_ALERT_CMD=aws sns publish --region us-east-1 --topic-arn arn:aws:sns:us-e
 Requires the AWS CLI on the VM (`sudo snap install aws-cli --classic`). If you'd rather not install
 it, any command taking a message as its final argument works — a [healthchecks.io](https://healthchecks.io)
 `curl` is a fine substitute.
+
+### h. Notice the failures alerting can't see
+
+Retention only buys time if something tells you to *use* it. Three failures survive everything above,
+because in each one the backup job either succeeds or never runs:
+
+| Failure | Why alerting misses it | Cheap check |
+|---|---|---|
+| Cron never fires (bad crontab, VM stopped) | No run, so no failure to report | `cat /var/backups/buzz/LAST_SUCCESS` — stale date = no backups |
+| Backups succeed but restore doesn't work | Every run is green | §7, done for real, at least once |
+| Data was already corrupt when dumped | A faithful backup of bad data | The `monthly/` tier — the only way back past the damage |
+
+The first is worth automating: an S3 **CloudWatch alarm** on the bucket's `PutRequests` metric,
+alerting to the same SNS topic when it drops to zero over 48 hours, catches "the backups quietly
+stopped" without any code on the VM. Everything else on this page fails loudly; that one fails
+silently, which is why it deserves the alarm.
 
 ## 7. Restore drill (a backup you haven't restored isn't a backup)
 

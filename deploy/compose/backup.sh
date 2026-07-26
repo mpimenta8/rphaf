@@ -119,8 +119,21 @@ log "local backup ready: ${DEST} ($(du -sh "$DEST" | cut -f1))"
 # --- 5. Offsite (optional, strongly recommended). --------------------------
 if [[ -n "$RCLONE_REMOTE" ]]; then
   command -v rclone >/dev/null || die "BACKUP_RCLONE_REMOTE set but rclone not installed"
-  log "shipping offsite -> ${RCLONE_REMOTE}/${TS}"
-  rclone copy "$DEST" "${RCLONE_REMOTE}/${TS}"
+
+  # Tier the upload so retention can differ by age (PROVISIONING.md §6a):
+  #   daily/   kept 30 days  — the routine "restore last night" case
+  #   monthly/ kept 1 year   — the long tail, for damage noticed months later
+  # The FIRST successful backup of each calendar month becomes that month's
+  # monthly. Deliberately not "if today is the 1st": a single failed run on the
+  # 1st would otherwise cost the whole month's long-term restore point.
+  TIER=daily
+  if ! rclone lsf "${RCLONE_REMOTE}/monthly/" 2>/dev/null | grep -q "^$(date -u +%Y%m)"; then
+    TIER=monthly
+    log "no monthly backup yet for $(date -u +%Y-%m) — filing this run as monthly"
+  fi
+
+  log "shipping offsite -> ${RCLONE_REMOTE}/${TIER}/${TS}"
+  rclone copy "$DEST" "${RCLONE_REMOTE}/${TIER}/${TS}"
   log "offsite copy complete"
 else
   log "WARNING: no offsite target (BACKUP_RCLONE_REMOTE empty)."

@@ -436,6 +436,27 @@ backup** — do the restore drill once (see `PROVISIONING.md` §7).
 - SSE-S3 at rest covers the `.env` snapshot without an rclone-`crypt` passphrase, which would
   otherwise have to live off-box or be lost with the VM it protects.
 
+**AWS access model (as of 2026-07-26) — read before attempting §6.**
+- Matt's access to the relay's account is an **IAM user the friend created**, not root and not his
+  own account. Console top-right shows `<username> @ <account-alias-or-ID>` (a root login would show
+  an email there instead). **That 12-digit number is the `<RELAY_ACCOUNT_ID>`** §6c's bucket policy
+  needs — it's readable straight off the console, no need to ask for it.
+- **Matt already has his own AWS account** (created before the friend's invite, root login = his own
+  email). So §6a is **unblocked** — no account creation needed. The two accounts are entirely
+  separate: being invited into the friend's did not link or nest them, and **AWS offers no built-in
+  switching**. Different sign-in URLs (generic console → root/own; `https://<account-id>.signin.aws.
+  amazon.com/console` → IAM user/friend's), and the wrong door reads as "locked out of my own
+  account". Set an **account alias** on each so the console top-right names the account instead of
+  showing a bare 12-digit number — cheapest guard against acting in the wrong one.
+- **Likely blocker: an IAM user often can't create IAM roles**, which §6b requires in the *friend's*
+  account. Check early via IAM → Roles → Create role; if unauthorized, the friend either attaches
+  `IAMFullAccess` or creates the role himself from §6b's JSON. Everything else in §6 (bucket,
+  lifecycle, bucket policy) is entirely in Matt's own account and unblocked.
+- **The console holds one identity per browser**, so signing into one account silently signs you out
+  of the other — surfacing as confusing `AccessDenied`s mid-task. §6 alternates accounts four times;
+  set up two browser profiles first. Sign-in URLs differ too: the IAM user needs
+  `https://<account-id>.signin.aws.amazon.com/console`, not the generic console URL.
+
 **`backup.sh` hardening (same change):** `BACKUP_ALERT_CMD` fires once on failure (an EXIT trap
 catches aborts that bypass `die`; a `REPORTED` flag prevents double-reporting); `tar` exit 1 (files
 changed mid-archive) is a warning while 2+ is fatal, instead of the old blanket `|| log "skipped"`
