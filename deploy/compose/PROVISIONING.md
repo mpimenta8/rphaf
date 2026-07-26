@@ -1,66 +1,60 @@
 # VM provisioning — from bare box to running relay
 
-Provider-agnostic steps to stand up the rphaf/Buzz relay on a fresh **Ubuntu 24.04 LTS** VM,
-harden it, install Docker, open the firewall, deploy, and wire nightly offsite backups.
+Steps to stand up the rphaf/Buzz relay on a fresh **Ubuntu 24.04 LTS or newer** VM, harden it,
+install Docker, open the firewall, deploy, and wire nightly offsite backups.
 
-Assumes the recommendation from `PLANNING.md`: a **DigitalOcean 4 GB droplet in a US region**, the
-`rphaf.io` domain, and that you've settled your **owner key** (see `PLANNING.md` Part 1). Commands
-are copy-paste; run them in order. `sudo`-prefixed commands need root.
+**Written for AWS EC2**, which is what the relay actually runs on: a `t4g.medium` in `us-east-1`,
+in a friend's personal account funded by his credits. §3 onward is provider-agnostic and was
+originally proven on DigitalOcean; §1–§2 are AWS-specific and call out the DO equivalents where they
+differ. Assumes the `rphaf.io` domain and that you've settled your **owner key** (see `PLANNING.md`
+Part 1 — note `PLANNING.md` itself still recommends DigitalOcean and is pending the same update).
 
-> **One exception to "in order":** §0 (DNS) needs the VM's IP from §1, and depends on the domain
-> owner. Read §0 first, create the VM (§1), then fire off the DNS request and keep working through
-> §2–§4 while it propagates.
+Commands are copy-paste; run them in order. `sudo`-prefixed commands need root.
+
+> **One exception to "in order":** §0 (DNS) needs the VM's IP from §1. Read §0 first, create the VM
+> (§1), then set the DNS record and keep working through §3–§4 while it propagates.
+
+> **On AWS, §2 is a no-op — skip it.** Canonical's AMI already ships what it builds by hand. See §2.
 
 ---
 
-## 0. DNS — coordinate with the domain owner
+## 0. DNS — self-serve in Route 53
 
-`rphaf.io` is registered by a friend, so this is a **hand-off, not a solo step**. Budget for a
-round-trip: it's the one part of the process that depends on someone else being awake.
+`rphaf.io` is registered by a friend, but its hosted zone lives in **the same AWS account we have
+access to**, so this is a **solo step, not a hand-off** — no waiting on anyone. (Earlier revisions of
+this guide framed it as a request to send; that was wrong and cost a round-trip.)
 
-### Sequencing (read before you ping anyone)
+### Sequencing
 The record needs the VM's public IP, which doesn't exist until §1 — but DNS is also the slowest link
 in the chain, and Caddy can't issue a TLS cert until the name resolves. So:
 
-1. **Create the VM first** (§1), grab its IP.
-2. **Then** send the request below.
-3. Continue with §2–§4 (hardening, firewall, Docker) **while DNS propagates** — none of it needs DNS.
+1. **Create the VM first** (§1) and attach its **Elastic IP**. Use the *Elastic* IP, never the
+   auto-assigned public one — that changes on every stop/start and would silently break DNS and TLS.
+2. **Then** create the record below.
+3. Continue with §3–§4 (firewall, Docker) **while DNS propagates** — neither needs DNS.
 4. Only §5 (deploy) actually blocks on the record being live.
 
 ### Pick the hostname
-`jean.rphaf.io` is the assumed name throughout this guide. If you choose differently, substitute it
-everywhere below — it also lands in `.env` via `gen-env.sh --domain`, and changing it later means
-re-issuing certs and re-pointing every client.
+**`jean.rphaf.io` is settled** — it's baked into the A record, the TLS cert, five `.env` values, and
+every client's stored relay URL. Don't change it casually; see §5b for what that costs (it breaks
+every historical image and video).
 
-### What to ask for
-Two options — pick one and be explicit about which, since they're very different asks:
+### Create the record
 
-| Option | What the owner does | Best when |
-|---|---|---|
-| **A. Single A record** (recommended) | Adds one record for `jean.rphaf.io`. Nothing else changes. | You need one hostname and don't expect churn. |
-| **B. NS delegation** | Delegates all of `jean.rphaf.io` (or a `relay.` subtree) to a nameserver you control. | You want to self-serve future records without asking again. |
+Route 53 → **Hosted zones** → `rphaf.io` → **Create record**:
 
-Start with **A**. It's a two-minute change on their side and doesn't hand you control of anything
-they'd have to trust you with. Move to B only if you find yourself asking repeatedly.
+```
+Record name:  jean          (full name: jean.rphaf.io)
+Record type:  A
+Value:        <ELASTIC_IP>
+TTL:          300
+Routing:      Simple routing
+```
 
-### Message to send
+Low TTL (300s) on purpose so mistakes are fixable in minutes rather than a day.
 
-`rphaf.io` is hosted on **AWS Route 53** (verified via `dig NS rphaf.io` — `ns-*.awsdns-*`), so
-there's no CDN/proxy layer to worry about and the record is a plain A record:
-
-> Can you add a DNS record for `rphaf.io` in Route 53?
->
-> In the `rphaf.io` hosted zone → **Create record**:
->
-> ```
-> Record name:  jean          (full name: jean.rphaf.io)
-> Record type:  A
-> Value:        <VM_PUBLIC_IP>
-> TTL:          300
-> Routing:      Simple routing
-> ```
->
-> Low TTL (300s) on purpose so we can fix mistakes fast; we can raise it once it's stable.
+> **To *edit* an existing record, tick its checkbox** — clicking the record *name* doesn't reveal
+> the "Edit record" button, which looks exactly like missing permissions and is not.
 
 ### If the domain ever moves behind a proxy (Cloudflare et al.)
 Not currently applicable on Route 53, but if `rphaf.io` is ever fronted by Cloudflare, the record
@@ -73,7 +67,7 @@ two ways:
   transport (`wss://`).
 
 ### Hold off on the AAAA record
-The droplet has a public IPv6 address, but **add IPv4 only to start.** Let's Encrypt *prefers* IPv6
+**Add IPv4 only to start**, even if the host has a public IPv6 address. Let's Encrypt *prefers* IPv6
 when an AAAA record exists, so if the host's IPv6 routing or firewall isn't right, certificate
 issuance fails while everything looks healthy over IPv4 — a confusing way to lose an afternoon. Add
 AAAA later, once the relay is up and IPv6 reachability is confirmed.
@@ -91,50 +85,97 @@ a *different* IP, the record points somewhere else (an old host, or a Cloudflare
 cloud didn't get set). Resolve that before §5; Caddy will burn Let's Encrypt rate limits retrying
 against a name that doesn't point at it.
 
-## 1. Create the VM
+## 1. Create the VM (EC2)
 
-- Image: **Ubuntu 24.04 LTS**.
-- Plan: **Basic → Premium Intel/AMD, 2 vCPU / 4 GB / 120 GB NVMe** (~$32/mo). Beware DO's `$24` row
-  in the *Premium* list — it's only **2 GB**, which `PLANNING.md` calls too tight.
-- Add your **SSH public key** during creation (password logins are a liability). If DO's setup flow
-  tells you to run `ssh-keygen` and the file already exists, **answer `n`** — overwriting destroys
-  the key registered with GitHub. Paste the existing `~/.ssh/id_ed25519.pub` instead.
-- Backups **off** (we ship offsite backups in §6), monitoring **on**, IPv6 **on**.
-- Skip DO's cloud firewall — §3 configures `ufw`. If you add one anyway, it must allow inbound
+EC2 → **Launch instance**:
+
+- **Name:** `rphaf-relay`.
+- **AMI:** Ubuntu Server **24.04 LTS or newer** (the default has moved past 24.04 — 26.04 is fine and
+  was a non-event in practice).
+- **⚠️ Switch the architecture selector to `64-bit (Arm)` on the AMI card *before* picking the
+  instance type** — it defaults to x86 and `t4g.*` simply won't appear in the list. The whole stack
+  is multi-arch (verified against every image's manifest), so Arm is free performance-per-dollar.
+- **Instance type:** `t4g.medium` (2 vCPU / 4 GB). Idle footprint is ~485 MB, so 4 GB is
+  right-sized with headroom. Resizing later is stop → change type → start, and both the EBS volume
+  and the Elastic IP survive it.
+- **Key pair:** your existing ed25519 key, imported (ours is `rphaf-navi`). Never create a new one
+  that overwrites `~/.ssh/id_ed25519` locally — that's the key registered with GitHub.
+- **Storage:** 120 GB `gp3`, and **tick Encrypted** (default `aws/ebs` key is fine).
+  - **You cannot encrypt in place later** — it's snapshot → copy-with-encryption → swap volumes.
+    It's free and snapshots inherit it, so there is no reason not to.
+  - Set **Delete on termination: No**, and enable **Termination protection** (Advanced details).
+    Both free; together they turn a misclick from "restore everything from backup" into a non-event.
+- **Security group** `rphaf-relay-sg`: `22` = My IP, `80` + `443` = `0.0.0.0/0`. Both of the latter
+  **must** be world-open — Let's Encrypt validates from unpredictable IPs, and friends connect from
+  anywhere.
+  - The SG is **in addition to** `ufw` in §3, not instead of it. If the SG blocks 80/443, Caddy
+    can't complete its ACME challenge and you'll spend an hour debugging a firewall you forgot
+    existed.
+- **`t4g` is burstable** (CPU credits, "unlimited" mode on by default). Irrelevant for an idle chat
+  relay, but it's where a surprise CPU bill would come from — set a billing alarm regardless, so
+  credits running out arrives as an alert and not an invoice.
+
+Then **allocate and associate an Elastic IP** (EC2 → Elastic IPs → Allocate → Associate):
+
+> **This is mandatory, not optional.** EC2's auto-assigned public IP **changes on every stop/start**,
+> which would silently break DNS and TLS for everyone — and resizing the instance *requires* a
+> stop/start. It's free while attached, and it's the address that goes in the §0 A record.
+
+SSH in — the login user is **`ubuntu`**, not `root`:
+
+```bash
+ssh ubuntu@<ELASTIC_IP>
+```
+
+> **Now create the DNS record from §0** with this Elastic IP, then continue. Propagation runs in the
+> background while you do §3–§4.
+
+<details>
+<summary>DigitalOcean equivalent (the original target; kept as a fallback)</summary>
+
+- Image **Ubuntu 24.04 LTS**; plan **Basic → Premium Intel/AMD, 2 vCPU / 4 GB / 120 GB NVMe**
+  (~$32/mo). Beware the `$24` row in the *Premium* list — it's only **2 GB**, which `PLANNING.md`
+  calls too tight.
+- Add your SSH public key during creation. If DO's flow suggests `ssh-keygen` and the file already
+  exists, **answer `n`** — overwriting destroys the key registered with GitHub.
+- Backups **off** (§6 covers offsite), monitoring **on**, IPv6 **on**.
+- Skip DO's cloud firewall — §3 configures `ufw`. If you add one anyway it must allow inbound
   **22, 80, 443**, or it silently overrides everything `ufw` permits and locks you out.
+- Login is `ssh root@<IP>`, so **§2 applies on DO** — unlike AWS.
 
-SSH in:
+</details>
 
-```bash
-ssh root@<VM_PUBLIC_IP>
-```
+## 2. Baseline hardening — **skip this entirely on AWS**
 
-> **Now send the DNS request from §0** with this IP, before continuing. Propagation runs in the
-> background while you do §2–§4.
+Canonical's AWS AMI already ships exactly what this section builds by hand: a non-root sudo user
+(`ubuntu`) with key-only SSH, **root login disabled, and password auth disabled**. Adding a separate
+`buzz` user buys no security and re-takes the lockout risk for nothing. Everything downstream uses
+`$USER`, so `ubuntu` works throughout.
 
-## 2. Baseline hardening
-
-Create a non-root user with sudo, and move SSH to it (you'll stop logging in as root):
-
-```bash
-adduser --gecos "" buzz            # set a password when prompted
-usermod -aG sudo buzz
-rsync --archive --chown=buzz:buzz ~/.ssh /home/buzz   # copy your authorized_keys over
-```
-
-Open a **second** SSH session as the new user to confirm it works *before* locking root out:
+**Verify rather than assume** — this takes one command:
 
 ```bash
-ssh buzz@<VM_PUBLIC_IP>            # from your laptop, in a new terminal
+sudo sshd -T | grep -Ei 'permitrootlogin|passwordauthentication'
+# expect: permitrootlogin no / passwordauthentication no
 ```
 
-Once that works, disable root & password SSH:
+> `sudo` is required: unprivileged, `sshd -T` dies on
+> `/etc/ssh/sshd_config.d/50-cloud-init.conf: Permission denied`.
+
+`sshd -T` prints the **effective** config and is the only real check. We once ran a `sed` over
+`/etc/ssh/sshd_config` that silently left `PermitRootLogin yes` in force while we assumed it had
+applied — don't trust the edit, trust `sshd -T`.
+
+**Audit the keys, though — that part still applies on AWS.** Every line in `authorized_keys` is a
+passwordless path to root:
 
 ```bash
-sudo sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
-sudo sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
-sudo systemctl restart ssh
+cat ~/.ssh/authorized_keys
 ```
+
+Ours started with two and we pruned one belonging to a **work-issued Mac** (IT holds admin/MDM/remote
+-wipe on it, and it goes back if the job ends). Also remove retired keys from the **provider account**
+— otherwise they get re-injected into every future VM.
 
 Enable automatic security patches:
 
@@ -142,6 +183,39 @@ Enable automatic security patches:
 sudo apt-get update && sudo apt-get install -y unattended-upgrades
 sudo dpkg-reconfigure -f noninteractive unattended-upgrades
 ```
+
+<details>
+<summary>Non-AWS hosts (DigitalOcean etc.): create the non-root user by hand</summary>
+
+DO drops you in as `root` with no unprivileged user, so build one:
+
+```bash
+adduser --gecos "" buzz            # set a password when prompted
+usermod -aG sudo buzz
+rsync --archive --chown=buzz:buzz ~/.ssh /home/buzz   # copy your authorized_keys over
+```
+
+Open a **second** SSH session as the new user and confirm it works *before* locking root out:
+
+```bash
+ssh buzz@<VM_PUBLIC_IP>            # from your laptop, in a new terminal
+```
+
+Once that works:
+
+```bash
+sudo sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
+sudo sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+sudo sshd -t                       # validate BEFORE restarting — a typo locks you out
+sudo systemctl restart ssh
+sudo sshd -T | grep -Ei 'permitrootlogin|passwordauthentication'   # verify the effective config
+```
+
+Keep the second session open until a **third** one verifies. Note cloud-init already sets
+`PasswordAuthentication no` (in `50-cloud-init.conf`) whenever the VM is created with an SSH key, so
+that half was never actually your doing.
+
+</details>
 
 ## 3. Firewall (ufw)
 
@@ -178,6 +252,16 @@ free -h                                                      # confirm Swap: 2.0
 > Skip only if you provisioned 8 GB **and** are staying on "just chat". Swap is cheap insurance
 > either way.
 
+## 3c. Let Redis fork safely
+
+Redis forks to snapshot, which can fail on a small box without memory overcommit. One line, worth
+doing on any new host:
+
+```bash
+sudo sysctl -w vm.overcommit_memory=1
+echo 'vm.overcommit_memory=1' | sudo tee /etc/sysctl.d/99-redis-overcommit.conf
+```
+
 ## 4. Install Docker Engine + Compose plugin
 
 ```bash
@@ -186,6 +270,10 @@ sudo usermod -aG docker "$USER"      # run docker without sudo
 newgrp docker                        # apply the group now (or log out/in)
 docker compose version               # expect v2.24.4+
 ```
+
+> **If this fails on a brand-new Ubuntu release:** `get.docker.com` keys off the release codename and
+> can lag by a few weeks. Fall back to the previous LTS codename, or to Ubuntu's own `docker.io` +
+> `docker-compose-v2` packages. (This did **not** happen on 26.04 — the script already supported it.)
 
 ## 5. Deploy
 

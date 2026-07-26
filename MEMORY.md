@@ -223,8 +223,17 @@ value warrants it — it's a one-line `DATABASE_URL` swap, not a rebuild.
   Compose **v5.3.1**. Idle footprint ~474 MB of 3.8 GB — comfortably under the ~1.2 GB estimate,
   which is the datapoint that says 4 GB is right-sized. **None of that work is wasted:**
   `PROVISIONING.md` §2–§4 are provider-agnostic and port to EC2 nearly unchanged.
-- **Docs still describe DigitalOcean.** `PLANNING.md` and `PROVISIONING.md` §1–§2 need rewriting for
-  AWS (keep DO as a documented alternative rather than deleting it).
+- **`PROVISIONING.md` is now AWS-first (done 2026-07-26).** §0–§2 rewritten for EC2; DO kept as
+  collapsed `<details>` fallbacks rather than deleted, since it's still the rollback until the
+  droplet is cancelled. Corrections worth knowing: **§0 is self-serve** (Route 53 is in the account
+  we can reach — the old "message to send the domain owner" framing was wrong and cost a
+  round-trip); **§2 is explicitly a no-op on AWS** and now says so in its heading, because it used to
+  walk you through an SSH-lockout risk to reach a state Canonical's AMI already ships. New §3c
+  (Redis `vm.overcommit_memory`) and the `get.docker.com` codename-lag fallback in §4 were
+  hard-won knowledge that had only ever lived in this file.
+- **`PLANNING.md` still recommends DigitalOcean** — the last doc pending the AWS rewrite. Its
+  owner-key guidance (Part 1) is still correct and referenced from `PROVISIONING.md`; it's the
+  host-options matrix that's stale.
 - **SSH hardening gotchas, learned the hard way:**
   - **Verify every step with `sudo sshd -T`, never trust the edit.** A `sed` on
     `/etc/ssh/sshd_config` silently left `PermitRootLogin yes` in place while we assumed it applied.
