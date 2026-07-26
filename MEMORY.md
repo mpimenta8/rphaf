@@ -436,6 +436,25 @@ backup** — do the restore drill once (see `PROVISIONING.md` §7).
 - SSE-S3 at rest covers the `.env` snapshot without an rclone-`crypt` passphrase, which would
   otherwise have to live off-box or be lost with the VM it protects.
 
+**§6a DONE (2026-07-26).** Bucket **`rphaf-backup-bucket`** exists in Matt's own account,
+`us-east-1`, versioned, SSE-S3, with three lifecycle rules verified via
+`aws s3api get-bucket-lifecycle-configuration`: `expire-dailies` (`relay/daily/`, 30d),
+`expire-monthlies` (`relay/monthly/`, 365d), both with `NoncurrentVersionExpiration: 7`, plus
+`clean-delete-markers` (`relay/`, `ExpiredObjectDeleteMarker`).
+- **The trap that nearly shipped:** on a *versioned* bucket, `Expiration` alone deletes **nothing** —
+  it inserts a delete marker and the bytes live on as a noncurrent version, billed forever. Only
+  `NoncurrentVersionExpiration` reclaims them, and the console's rule builder happily saves the first
+  without the second. Fails safe for data, silently defeats the cost ceiling. **Set lifecycle rules
+  via `put-bucket-lifecycle-configuration` (CloudShell), not by clicking**, and verify with the
+  `get-` call — the runbook now does both.
+- `ExpiredObjectDeleteMarker` cannot share an `Expiration` block with `Days`; it needs its own rule.
+- **Retention is two-tier on purpose.** A flat 30 days only answers loud failures (dead VM, deleted
+  channel). Damage noticed on day 37 would already be in every surviving backup — hence the 12-month
+  `monthly/` tail. `backup.sh` picks the tier by "no monthly exists for this year-month yet" rather
+  than "today is the 1st", so a failed run on the 1st doesn't cost the month's restore point.
+- Cost ≈ `(30 + 12) × nightly-size × $0.023/GB`. **These are full backups, not incrementals**, so
+  cost scales with retention × dataset — revisit if shared media reaches tens of GB.
+
 **AWS access model (as of 2026-07-26) — read before attempting §6.**
 - Matt's access to the relay's account is an **IAM user the friend created**, not root and not his
   own account. Console top-right shows `<username> @ <account-alias-or-ID>` (a root login would show
