@@ -219,6 +219,34 @@ Add yourself + friends (see `PLANNING.md` Part 1 for the owner-key rule):
 
 Friends point the desktop app at `wss://jean.rphaf.io`.
 
+### Troubleshooting: "Community rejected: Load failed"
+
+That message in the desktop app's **Add Community** dialog is a **transport failure, not a
+membership rejection** — a real denial names your pubkey. The usual cause is CORS.
+
+The Tauri app is not served from your domain; its webview origin is `tauri://localhost`
+(macOS/Linux) or `http://tauri.localhost` (Windows). If `BUZZ_CORS_ORIGINS` lists only
+`https://<your-domain>`, the relay omits the `access-control-allow-origin` header and **every**
+desktop client fails — the official upstream build included.
+
+Confirm from any machine:
+
+```bash
+curl -sS -i -X OPTIONS https://jean.rphaf.io/ \
+  -H "Origin: tauri://localhost" -H "Access-Control-Request-Method: POST" | grep -i access-control
+```
+
+No `access-control-allow-origin` line means this is your problem. Fix on the relay host:
+
+```bash
+cd /opt/rphaf/deploy/compose
+sed -i 's|^BUZZ_CORS_ORIGINS=.*|BUZZ_CORS_ORIGINS=https://jean.rphaf.io,tauri://localhost,http://tauri.localhost|' .env
+grep ^BUZZ_CORS_ORIGINS .env
+./run.sh restart
+```
+
+`gen-env.sh` now includes the desktop origins automatically, so fresh installs don't hit this.
+
 ### Optional: cap Redis on a 4 GB box
 `compose.yml` starts Redis with no `maxmemory`, so nothing bounds its growth. In practice Buzz only
 puts **expiring** keys there — presence (`presence.rs`), rate-limit counters (`rate_limiter.rs`), and

@@ -178,21 +178,98 @@ value warrants it — it's a one-line `DATABASE_URL` swap, not a rebuild.
   grey-cloud/proxy caveat doesn't apply. Request a plain A record. **IPv4 only at first:** Let's
   Encrypt prefers IPv6 when an AAAA record exists, so an unverified IPv6 path fails cert issuance
   while everything looks healthy over IPv4.
-- **Host: DigitalOcean, $32/mo Premium Intel — 2 vCPU / 4 GB / 120 GB NVMe / 4 TB transfer**, US
-  region. Took NVMe + the larger disk over the $24 Regular SSD tier: Postgres is I/O-sensitive, and
-  disk is what grows (MinIO media) — DO disk resizes are the one change that is *not* reversible.
-  Note the $24 row in DO's *Premium* list is only **2 GB** — not the same as the $24 Regular 4 GB
-  tier the earlier docs cited. Everyone is US-based, and EU hosting's ~90–120ms
-  hurts *media upload/download* specifically (chat send/receive is imperceptible). 4 GB is ~3x the
-  estimated ~1.2 GB steady state for "just chat"; DO's CPU/RAM resize is reversible, so starting
-  small is low-risk.
-- **The droplet exists (2026-07-25):** `rphaf-ubuntu-nyc3`, Ubuntu 24.04, region **NYC3**.
-  IPv4 **68.183.145.188** (SSH confirmed open), IPv6 `2604:a880:800:14:0:3:48dc:4000` (deliberately
-  **not** in DNS yet — see the AAAA note above). Created with no DO cloud firewall and no startup
-  script: `ufw` is configured by hand in `PROVISIONING.md` §3, and automating §2 would skip the
-  "confirm the new user's SSH works *before* disabling root" check that prevents lockout.
-  **Blocked on:** the `jean.rphaf.io` A record, which needs the domain owner (AWS admin access
-  pending).
+- **⚠️ HOST CHANGED 2026-07-25 (late): moving to AWS EC2, in a friend's *personal* account.** He has
+  a pile of **AWS credits to burn**, wants hands-on AWS practice, and Matt gets day-job value from
+  the same — plus it consolidates with Route 53, which already hosts `rphaf.io`. Credits were the
+  explicit tipping point: without them AWS costs *more* than DO (metered egress vs DO's included
+  4 TB) and the call was the other way. Ownership/admin dilution is a **non-issue** here: 15+ year
+  friendship, former roommates.
+  **Live as of 2026-07-25:** instance `rphaf-relay`, `t4g.medium` (ARM Graviton, 2 vCPU / 4 GB),
+  **Ubuntu 26.04 LTS** (the AMI default has moved past 24.04 — docs should say "24.04 LTS or newer"
+  rather than pinning), 120 GB `gp3` **encrypted** with the default `aws/ebs` key, `us-east-1`.
+  SG `rphaf-relay-sg`: 22 = My IP, 80 + 443 = `0.0.0.0/0` (both *must* be world-open — Let's Encrypt
+  validates from unpredictable IPs and friends connect from anywhere). Key pair imported as
+  `rphaf-navi`. **Elastic IP: `34.224.118.116`.** Start at `medium` — resizing to `large` is
+  stop → change instance type → start, with EBS and the EIP surviving intact.
+  - **Encrypt the EBS volume at launch** — you *cannot* encrypt in place later (it's
+    snapshot → copy-with-encryption → swap volumes). Free, and snapshots inherit it.
+  - Set **`Delete on termination: No`** and enable **Termination protection**: both free, and they
+    turn a misclick from "restore everything from backup" into a non-event.
+- **AWS gotchas (the reason this isn't just "same steps, new provider"):**
+  - **An Elastic IP is mandatory.** EC2's auto-assigned public IP **changes on every stop/start**,
+    which would silently break DNS + TLS for everyone. It's also what makes resizing safe, since a
+    resize *requires* a stop/start. Free while attached. The **EIP** is what goes in the A record.
+  - **The Arm architecture selector hides `t4g.*`.** The AMI card defaults to 64-bit x86; switch it
+    to **64-bit (Arm)** *before* picking the instance type or `t4g` won't appear at all. Arm is fine
+    — the whole stack is multi-arch (verified).
+  - **Security Group is *in addition to* `ufw`, not instead of.** If the SG blocks 80/443, Caddy
+    can't complete an ACME challenge and you'll debug a firewall you forgot existed.
+  - **Login user is `ubuntu`, not `root`** — and **§2's user creation should be skipped entirely on
+    AWS.** Canonical's AMI already ships exactly what §2 builds by hand: a non-root sudo user with
+    key-only SSH, root login disabled, password auth disabled. Adding a `buzz` user buys no security
+    and re-takes the lockout risk for nothing. `PROVISIONING.md` uses `$USER` downstream, so
+    `ubuntu` works throughout.
+  - **`get.docker.com` keys off the release codename** and can lag a brand-new Ubuntu. If §4 fails
+    on 26.04, fall back to the previous LTS codename or Ubuntu's own `docker.io` +
+    `docker-compose-v2` packages.
+  - `t4g` is **burstable** (CPU credits, "unlimited" mode on by default) — irrelevant for an idle
+    chat relay, but it's where surprise CPU charges would come from. Set a **billing alarm anyway**,
+    so credits running out arrives as an alert rather than an invoice.
+- **The DO droplet stays alive until the relay is verified on EC2**, then gets cancelled before the
+  next billing date — it's the rollback. For reference it was `rphaf-ubuntu-nyc3`, NYC3, Ubuntu
+  24.04, IPv4 `68.183.145.188`, $32/mo, and it reached: `buzz` user (sudo, key-only SSH),
+  `PermitRootLogin no` + `PasswordAuthentication no` (both verified via `sudo sshd -T`), `ufw` active
+  with default-deny and only 22/80/443 open (v4 **and** v6), 2 GB swap at `vm.swappiness=10`, Docker
+  Compose **v5.3.1**. Idle footprint ~474 MB of 3.8 GB — comfortably under the ~1.2 GB estimate,
+  which is the datapoint that says 4 GB is right-sized. **None of that work is wasted:**
+  `PROVISIONING.md` §2–§4 are provider-agnostic and port to EC2 nearly unchanged.
+- **Docs still describe DigitalOcean.** `PLANNING.md` and `PROVISIONING.md` §1–§2 need rewriting for
+  AWS (keep DO as a documented alternative rather than deleting it).
+- **SSH hardening gotchas, learned the hard way:**
+  - **Verify every step with `sudo sshd -T`, never trust the edit.** A `sed` on
+    `/etc/ssh/sshd_config` silently left `PermitRootLogin yes` in place while we assumed it applied.
+    `sshd -T` prints the *effective* config and is the only real check. Note it needs `sudo` —
+    unprivileged it dies on `/etc/ssh/sshd_config.d/50-cloud-init.conf: Permission denied`.
+  - **Cloud-init already sets `PasswordAuthentication no`** (in that `50-cloud-init.conf`) when the
+    VM is created with an SSH key — so that one was never actually our doing. True on DO; Canonical's
+    AWS AMI goes further and disables root login too.
+  - **`sudo sshd -t` before every `systemctl restart ssh`**; keep a second session open until a
+    third one verifies. A config typo takes the daemon down with no way back in.
+  - **Audit `authorized_keys` — every line is a passwordless path to root.** Started with 2 keys;
+    pruned an ECDSA key belonging to a **work-issued Mac** (IT holds admin/MDM/remote-wipe on it, and
+    it goes back if the job ends). Only the `navi` ed25519 remains — imported into EC2 as the
+    `rphaf-navi` key pair. Also remove retired keys from the **provider account**, or they get
+    re-injected into every future VM.
+  **DNS: DONE 2026-07-25.** `jean.rphaf.io` → **`34.224.118.116`**, confirmed on both the
+  authoritative nameserver and a public resolver. The record had originally been created against the
+  DigitalOcean IP before the AWS pivot and needed only its *value* edited. **Route 53 is in the same
+  AWS account we have access to, so this is self-serve** — Route 53 → Hosted zones → `rphaf.io` →
+  **tick the record's checkbox** (clicking the record *name* doesn't reveal "Edit record", which is
+  what made it look like we lacked permission) → Edit record → change Value. The 300 s TTL made the
+  correction land in minutes; a default 24 h TTL would have cost a day. Verify with
+  `dig +short jean.rphaf.io @ns-886.awsdns-46.net` (authoritative, instant) vs `@1.1.1.1` (what the
+  world — and Let's Encrypt — sees). **Never `./run.sh start` before the public resolver agrees**:
+  Caddy fails the ACME challenge against the wrong host and can burn per-domain rate limits that take
+  hours to reset.
+  **EC2 hardening done:** `ufw` active, default-deny incoming, only 22/80/443 (v4 **and** v6); 2 GB
+  swap; Docker Compose **v5.3.1** installed and usable without `sudo`. Idle at ~485 MB of 3.7 GB —
+  same as the DO box, confirming 4 GB is right-sized. **Ubuntu 26.04 was a non-event** —
+  `get.docker.com` supported it, so the codename-lag worry didn't materialise. **Still to verify:**
+  `sudo sshd -T | grep -iE "permitrootlogin|passwordauthentication"`.
+- **🎉 THE RELAY IS LIVE (2026-07-25).** `https://jean.rphaf.io/_liveness` returns `ok` over a valid
+  Let's Encrypt cert (`CN=jean.rphaf.io`, valid to 2026-10-23) — **verified from the public
+  internet**, not just from the box. All six containers came up healthy on the first
+  `BUZZ_COMPOSE_TLS=true ./run.sh start`. Full AWS write-up: [`docs/aws-deployment.md`](docs/aws-deployment.md).
+  - **The `/data/git` permission bug did NOT occur** — confirming the upstream fix really does ship
+    in `ghcr.io/block/buzz:main`, as the GHCR revision check predicted.
+  - **You do not need to add yourself as a member.** The relay auto-provisions `RELAY_OWNER_PUBKEY`
+    at first boot with role **`owner`** (which outranks `admin`); `add-member` on your own npub
+    correctly no-ops with "already a member". `list-members` shows `added_by: -` for that row.
+  - **Ignore a `grep CHANGE_ME .env` hit on line 2** — it's a *comment* in the template
+    (`# Copy to .env and replace every CHANGE_ME value…`). `gen-env.sh`'s own check requires
+    `KEY=…CHANGE_ME` and is the authoritative one; trust its "No placeholders left".
+  **Next:** nightly offsite backups (§6 — the last non-negotiable), a restore drill (§7), a billing
+  alarm, cancelling the DO droplet, and `sudo sshd -T` verification on EC2.
 - **Hetzner is no longer the pick.** Their **15 June 2026** increase raised CPX/CCX ~2.4–3x: CPX31 is
   now ~$74/mo in the US (dead) and ~$42 in Nuremberg. US locations only offer CPX/CCX, so there's no
   cheap Hetzner-US option at all. The surviving value play is **CAX21 (Arm, 4 vCPU / 8 GB, ~$12/mo)**
@@ -297,6 +374,11 @@ Point `DATABASE_URL` at a managed DB and delete the `postgres` service + its `de
   sidecar binaries, which is fine only while agents stay gated off).
 - **Decision: desktop-first, unsigned.** macOS/Windows cost the friend one click-through;
   Linux and Android are clean and free.
+- **Device mix: Matt is on iPhone, most of the crew is on Android.** Android is the cleanest free
+  path, so the majority costs nothing — but iOS is a *near-term* question, not one we can defer
+  indefinitely. For **Matt's own device** there is a free path (Xcode + free Apple ID sideload;
+  SideStore automates the 7-day re-signing), which is enough to test from iOS. The $99 only becomes
+  unavoidable when a *second* iPhone needs in.
 - **iPhone is the only hard paywall** — no free path that survives past 7 days. The $99/yr Apple
   Developer Program covers **both** Apple platforms (macOS notarization *and* TestFlight), and is
   the only item in the project with an external queue.
