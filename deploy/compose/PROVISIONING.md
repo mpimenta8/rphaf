@@ -401,7 +401,7 @@ Cost is ~$1–2/month at this scale — not covered by the friend's credits, and
 
 S3 → **Create bucket**, in **`us-east-1`**:
 
-- **Name:** globally unique, e.g. `rphaf-relay-backups` (add a suffix if taken).
+- **Name:** globally unique, e.g. `rphaf-backup-bucket` (add a suffix if taken).
 - **Block all public access:** ON (default). Leave it.
 - **Bucket Versioning:** **Enable** — a delete becomes a recoverable *delete marker* rather than
   destruction. (Note it does little against *overwrites* here: `backup.sh` writes every run to a
@@ -457,7 +457,7 @@ Roughly `(30 + 12) × <nightly size> × $0.023/GB` per month — so a 500 MB nig
 > Glacier Instant Retrieval via a lifecycle *transition* rule, or move to incrementals
 > (`restic`/`borg`) instead of `rclone copy`.
 
-Note the bucket ARN — `arn:aws:s3:::rphaf-relay-backups` — you'll need it twice below.
+Note the bucket ARN — `arn:aws:s3:::rphaf-backup-bucket` — you'll need it twice below.
 
 ### b. In the RELAY's account: an instance role that can write but not delete
 
@@ -469,9 +469,9 @@ inline policy (substitute your bucket name):
   "Version": "2012-10-17",
   "Statement": [
     { "Effect": "Allow", "Action": "s3:ListBucket",
-      "Resource": "arn:aws:s3:::rphaf-relay-backups" },
+      "Resource": "arn:aws:s3:::rphaf-backup-bucket" },
     { "Effect": "Allow", "Action": ["s3:PutObject", "s3:GetObject"],
-      "Resource": "arn:aws:s3:::rphaf-relay-backups/*" }
+      "Resource": "arn:aws:s3:::rphaf-backup-bucket/*" }
   ]
 }
 ```
@@ -496,8 +496,8 @@ S3 → your bucket → **Permissions → Bucket policy**. Substitute the relay a
     "Principal": { "AWS": "arn:aws:iam::<RELAY_ACCOUNT_ID>:role/rphaf-relay-backup" },
     "Action": ["s3:ListBucket", "s3:PutObject", "s3:GetObject"],
     "Resource": [
-      "arn:aws:s3:::rphaf-relay-backups",
-      "arn:aws:s3:::rphaf-relay-backups/*"
+      "arn:aws:s3:::rphaf-backup-bucket",
+      "arn:aws:s3:::rphaf-backup-bucket/*"
     ]
   }]
 }
@@ -526,7 +526,7 @@ EOF
 **no key is ever written to disk**. Confirm it works before going further:
 
 ```bash
-rclone lsd offsite:rphaf-relay-backups     # succeeds (empty listing) = role is wired correctly
+rclone lsd offsite:rphaf-backup-bucket     # succeeds (empty listing) = role is wired correctly
 ```
 
 An `AccessDenied` here means §6b or §6c is incomplete — fix it now, not after the first cron run
@@ -537,7 +537,7 @@ fails silently at 03:15.
 ```bash
 cd /opt/rphaf/deploy/compose
 cat > backup.env <<'EOF'
-BACKUP_RCLONE_REMOTE=offsite:rphaf-relay-backups/relay
+BACKUP_RCLONE_REMOTE=offsite:rphaf-backup-bucket/relay
 KEEP_DAYS=14
 EOF
 chmod 600 backup.env      # backup.env is gitignored (see root .gitignore) — won't be committed
@@ -550,8 +550,8 @@ chmod 600 backup.env      # backup.env is gitignored (see root .gitignore) — w
 ```bash
 sudo mkdir -p /var/backups/buzz && sudo chown "$USER" /var/backups/buzz
 ./backup.sh                       # watch it dump, archive, ship offsite
-rclone lsf offsite:rphaf-relay-backups/relay/            # expect: monthly/ (first run of the month)
-rclone ls  offsite:rphaf-relay-backups/relay             # confirm the objects actually landed
+rclone lsf offsite:rphaf-backup-bucket/relay/            # expect: monthly/ (first run of the month)
+rclone ls  offsite:rphaf-backup-bucket/relay             # confirm the objects actually landed
 crontab -e
 # add (nightly 03:15 UTC):
 15 3 * * * cd /opt/rphaf/deploy/compose && ./backup.sh >> /var/log/buzz-backup.log 2>&1
