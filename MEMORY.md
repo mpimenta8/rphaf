@@ -270,6 +270,24 @@ value warrants it — it's a one-line `DATABASE_URL` swap, not a rebuild.
     `KEY=…CHANGE_ME` and is the authoritative one; trust its "No placeholders left".
   **Next:** nightly offsite backups (§6 — the last non-negotiable), a restore drill (§7), a billing
   alarm, cancelling the DO droplet, and `sudo sshd -T` verification on EC2.
+- **⚠️ `BUZZ_COMPOSE_TLS=true` belongs on EVERY `run.sh` invocation that touches containers** —
+  `restart`, `stop`, `upgrade`, not just `start`. Without it Compose loads only the base file, which
+  **excludes Caddy**: you get `WARN Found orphan containers (buzz-prod-caddy-1)`, only 5 of 6
+  containers are managed, and Caddy drifts outside the project. It keeps serving (so TLS looks
+  fine), but the next `upgrade` skips it and anything with `--remove-orphans` deletes it — taking
+  HTTPS down. Reconcile with `BUZZ_COMPOSE_TLS=true ./run.sh restart`.
+- **CORS bug — fixed 2026-07-25 (commit `07455b291`), worth understanding.** `gen-env.sh` set
+  `BUZZ_CORS_ORIGINS` to the relay domain only, but the desktop app's webview origin is
+  `tauri://localhost` (macOS/Linux) / `http://tauri.localhost` (Windows). The relay then returned no
+  `access-control-allow-origin`, so **every** desktop client — the official upstream build
+  included — failed with `Community rejected: Load failed`. **That string is a *transport* failure,
+  not a membership rejection**; a real denial names your pubkey. Verified fixed: the relay now
+  returns `access-control-allow-origin: tauri://localhost`. Upstream's `.env.example` has the same
+  gap — **worth a PR to `block/buzz`**.
+  - Lesson on risk attribution: this lived in **our deploy tooling**, not the client fork. The fork
+    only hides UI via preview flags ("No Rust/server edits") and cannot cause connection failures.
+    Using upstream client builds would not have prevented it. Deploy-tooling bugs are the real
+    bespoke surface — and they're front-loaded, surfacing loudly during setup.
 - **Hetzner is no longer the pick.** Their **15 June 2026** increase raised CPX/CCX ~2.4–3x: CPX31 is
   now ~$74/mo in the US (dead) and ~$42 in Nuremberg. US locations only offer CPX/CCX, so there's no
   cheap Hetzner-US option at all. The surviving value play is **CAX21 (Arm, 4 vCPU / 8 GB, ~$12/mo)**
@@ -368,6 +386,18 @@ Point `DATABASE_URL` at a managed DB and delete the `postgres` service + its `de
 
 **Full write-up: [`docs/distribution.md`](docs/distribution.md).** The need-to-know:
 
+- **⭐ Upstream publishes public, installable builds — daily.** `gh release list --repo block/buzz`
+  shows `Buzz Desktop v0.4.26` etc. with `.dmg` (aarch64 + x64), `.deb`, `.AppImage`, and a Windows
+  `.exe` marked `alpha-unsigned` (implying the macOS DMGs *are* signed). **Since our relay is stock
+  upstream, the official app connects to `jean.rphaf.io` fine** — the fork's only differentiator is
+  which features are visible. So the pragmatic path is: friends install the **official signed
+  build** (no Gatekeeper dance, no $99, auto-updates), and we keep the fork for branding + gating.
+  Switching later is free and per-person: same relay, same keys, same data.
+- **Our local build works but the DMG step doesn't.** `just desktop-release-build` produced a valid
+  `Buzz.app` (Apple Silicon, ~133 MB) in ~3 min, then failed on `bundle_dmg.sh` — that step drives
+  Finder via AppleScript and dies in a non-interactive shell. The `.app` is complete and runnable;
+  retry the DMG from an interactive terminal if you need one. Confirmed the sidecar stubs are 0-byte
+  as designed.
 - **We build and distribute ourselves.** `just release-desktop` triggers `release.yml` in
   `block/buzz`, which signs with *Block's* Apple credentials — closed to a fork. Ours is
   `just desktop-release-build` (already labelled "unsigned, for testing"; note it stubs the
