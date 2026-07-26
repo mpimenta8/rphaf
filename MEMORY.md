@@ -254,8 +254,9 @@ value warrants it — it's a one-line `DATABASE_URL` swap, not a rebuild.
   **EC2 hardening done:** `ufw` active, default-deny incoming, only 22/80/443 (v4 **and** v6); 2 GB
   swap; Docker Compose **v5.3.1** installed and usable without `sudo`. Idle at ~485 MB of 3.7 GB —
   same as the DO box, confirming 4 GB is right-sized. **Ubuntu 26.04 was a non-event** —
-  `get.docker.com` supported it, so the codename-lag worry didn't materialise. **Still to verify:**
-  `sudo sshd -T | grep -iE "permitrootlogin|passwordauthentication"`.
+  `get.docker.com` supported it, so the codename-lag worry didn't materialise. **SSH verified via
+  `sudo sshd -T`: `permitrootlogin no`, `passwordauthentication no`.** Hardening is complete —
+  §2/§3/§3b/§4 all done and confirmed.
 - **🎉 THE RELAY IS LIVE (2026-07-25).** `https://jean.rphaf.io/_liveness` returns `ok` over a valid
   Let's Encrypt cert (`CN=jean.rphaf.io`, valid to 2026-10-23) — **verified from the public
   internet**, not just from the box. All six containers came up healthy on the first
@@ -276,6 +277,29 @@ value warrants it — it's a one-line `DATABASE_URL` swap, not a rebuild.
   containers are managed, and Caddy drifts outside the project. It keeps serving (so TLS looks
   fine), but the next `upgrade` skips it and anything with `--remove-orphans` deletes it — taking
   HTTPS down. Reconcile with `BUZZ_COMPOSE_TLS=true ./run.sh restart`.
+- **✅ Desktop client connects (2026-07-25).** After the CORS fix the relay logs show the owner
+  pubkey authenticating, `/query` + `/events` returning 200, events ingesting, and a live WebSocket
+  (`conn_id`, `ws.event` spans). **Fixing CORS alone was enough** — no client change needed. Note the
+  first attempt after the server fix still failed: the app had been running since *before* it, and
+  webviews cache CORS preflights, so **quit and relaunch the app** after any CORS change.
+- **Log noise that is NOT a problem — don't chase these:**
+  - **Postgres `ERROR: partition "events_p2026_07" would overlap partition "events_p_future"`**
+    (repeats for several months, both `events` and `delivery_log`). **Handled by design:**
+    `crates/buzz-db/src/partition.rs:137` catches SQLSTATE `42P17` and treats it as "already
+    ensured", because the fresh schema ships a catch-all `*_p_future` covering `2026-07-01 →
+    MAXVALUE` (`migrations/0001_initial_schema.sql:251`). Postgres logs the rejected statement;
+    the app carries on. Only long-term effect: monthly partitions never get created, so it's one
+    big partition — irrelevant at our volume.
+  - **NIP-29 `PUT_USER` for pubkeys that aren't ours** — those are *channel* members, not *relay*
+    members. `./run.sh list-members` confirmed the roster is still only the owner, and only relay
+    members can connect. Don't confuse the two.
+- **Redis wanted `vm.overcommit_memory=1`** (fork-for-snapshot can fail without it on a small box).
+  Applied via `sudo sysctl vm.overcommit_memory=1` + `/etc/sysctl.d/99-redis-overcommit.conf`.
+  Worth doing on any new host.
+- **`./run.sh logs` follows the stream** (`docker compose logs -f`) — `--tail N` only sets the
+  starting point, so it never exits. For a snapshot use
+  `docker compose --env-file .env -f compose.yml logs --tail 50 relay` and name a service; the
+  unscoped form interleaves all six containers.
 - **CORS bug — fixed 2026-07-25 (commit `07455b291`), worth understanding.** `gen-env.sh` set
   `BUZZ_CORS_ORIGINS` to the relay domain only, but the desktop app's webview origin is
   `tauri://localhost` (macOS/Linux) / `http://tauri.localhost` (Windows). The relay then returned no
