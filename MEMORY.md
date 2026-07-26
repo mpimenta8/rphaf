@@ -223,8 +223,17 @@ value warrants it — it's a one-line `DATABASE_URL` swap, not a rebuild.
   Compose **v5.3.1**. Idle footprint ~474 MB of 3.8 GB — comfortably under the ~1.2 GB estimate,
   which is the datapoint that says 4 GB is right-sized. **None of that work is wasted:**
   `PROVISIONING.md` §2–§4 are provider-agnostic and port to EC2 nearly unchanged.
-- **Docs still describe DigitalOcean.** `PLANNING.md` and `PROVISIONING.md` §1–§2 need rewriting for
-  AWS (keep DO as a documented alternative rather than deleting it).
+- **`PROVISIONING.md` is now AWS-first (done 2026-07-26).** §0–§2 rewritten for EC2; DO kept as
+  collapsed `<details>` fallbacks rather than deleted, since it's still the rollback until the
+  droplet is cancelled. Corrections worth knowing: **§0 is self-serve** (Route 53 is in the account
+  we can reach — the old "message to send the domain owner" framing was wrong and cost a
+  round-trip); **§2 is explicitly a no-op on AWS** and now says so in its heading, because it used to
+  walk you through an SSH-lockout risk to reach a state Canonical's AMI already ships. New §3c
+  (Redis `vm.overcommit_memory`) and the `get.docker.com` codename-lag fallback in §4 were
+  hard-won knowledge that had only ever lived in this file.
+- **`PLANNING.md` still recommends DigitalOcean** — the last doc pending the AWS rewrite. Its
+  owner-key guidance (Part 1) is still correct and referenced from `PROVISIONING.md`; it's the
+  host-options matrix that's stale.
 - **SSH hardening gotchas, learned the hard way:**
   - **Verify every step with `sudo sshd -T`, never trust the edit.** A `sed` on
     `/etc/ssh/sshd_config` silently left `PermitRootLogin yes` in place while we assumed it applied.
@@ -397,10 +406,138 @@ BUZZ_COMPOSE_TLS=true ./run.sh start
 
 ### Backups (day one, non-negotiable)
 `deploy/compose/backup.sh` does it: `pg_dump` + MinIO/git volume tars + `.env` snapshot + local
-rotation + optional offsite via rclone (`BACKUP_RCLONE_REMOTE`, e.g. in a gitignored `backup.env`).
+rotation + offsite via rclone (`BACKUP_RCLONE_REMOTE`, in a gitignored `backup.env`).
 Schedule it nightly via cron. A local-only backup dies with the VM — **set the offsite target.**
 `./run.sh backup-hint` prints the full checklist. **A backup you haven't restore-tested isn't a
 backup** — do the restore drill once (see `PROVISIONING.md` §7).
+
+**Offsite target: S3 in Matt's OWN AWS account — settled 2026-07-25.** Full runbook is
+`PROVISIONING.md` §6. Backblaze B2 was considered and rejected. The reasoning, so nobody reopens it:
+- **S3 over B2 — because of egress, not credits.** `backup.sh` ships a **full** backup nightly (fresh
+  timestamped prefix, never incremental). EC2 → S3 **same-region is free**; any other provider meters
+  that egress and the bill grows with the media volume. At ~$1–2/mo the credits argument that drove
+  the relay to AWS is *irrelevant* here — this was decided on egress and credential handling.
+- **A separate account from the relay — this is the important half.** The relay lives in a friend's
+  personal account on **expiring credits**; `docs/threat-model.md` notes credits running out arrives
+  as an outage, not a warning. Same-account backups die with that account (suspension, closure,
+  falling-out) — the exact failure offsite backups exist to survive. Ownership dilution is a non-issue
+  for the relay (MEMORY says so above) but backups are the exception: they must outlive it.
+- **Instance role, no stored key.** rclone `env_auth = true` reads EC2 instance metadata, so **no
+  credential is ever written to the relay host** — strictly better than B2's keyID/applicationKey in
+  `backup.env`. Cross-account needs **both** the role's identity policy *and* the bucket policy;
+  granting one silently `AccessDenied`s.
+- **The role gets no `s3:DeleteObject`.** Nightly runs write to fresh prefixes, so `rclone copy`
+  never deletes — a compromised relay host cannot destroy backup history. **Offsite retention is a
+  bucket lifecycle rule** in Matt's account; `KEEP_DAYS` in `backup.env` prunes only the local copy.
+  Don't "fix" the script by adding offsite pruning — that's the property, not a gap.
+- **Bucket must be `us-east-1`** (relay's region). Same-region transfer is free *across accounts*;
+  elsewhere silently reintroduces metered transfer. Also set *Bucket owner enforced* so cross-account
+  writes are owned by the bucket owner — otherwise you can't read your own backups.
+- SSE-S3 at rest covers the `.env` snapshot without an rclone-`crypt` passphrase, which would
+  otherwise have to live off-box or be lost with the VM it protects.
+
+**§6a DONE (2026-07-26).** Bucket **`rphaf-backup-bucket`** exists in Matt's own account,
+`us-east-1`, versioned, SSE-S3, with three lifecycle rules verified via
+`aws s3api get-bucket-lifecycle-configuration`: `expire-dailies` (`relay/daily/`, 30d),
+`expire-monthlies` (`relay/monthly/`, 365d), both with `NoncurrentVersionExpiration: 7`, plus
+`clean-delete-markers` (`relay/`, `ExpiredObjectDeleteMarker`).
+- **The trap that nearly shipped:** on a *versioned* bucket, `Expiration` alone deletes **nothing** —
+  it inserts a delete marker and the bytes live on as a noncurrent version, billed forever. Only
+  `NoncurrentVersionExpiration` reclaims them, and the console's rule builder happily saves the first
+  without the second. Fails safe for data, silently defeats the cost ceiling. **Set lifecycle rules
+  via `put-bucket-lifecycle-configuration` (CloudShell), not by clicking**, and verify with the
+  `get-` call — the runbook now does both.
+- `ExpiredObjectDeleteMarker` cannot share an `Expiration` block with `Days`; it needs its own rule.
+- **rclone needs `no_check_bucket = true` against this least-privilege role.** Before uploading it
+  verifies the bucket exists and **tries to create it** on failure; with no `s3:CreateBucket` every
+  upload dies `AccessDenied … s3:CreateBucket` *before* reaching `PutObject`. `rclone lsd` keeps
+  succeeding throughout, because listing never triggers the check — so **`lsd` alone is a false
+  green light**, and only a probe upload proves the path. Don't grant `CreateBucket` to fix it.
+- **Retention is two-tier on purpose.** A flat 30 days only answers loud failures (dead VM, deleted
+  channel). Damage noticed on day 37 would already be in every surviving backup — hence the 12-month
+  `monthly/` tail. `backup.sh` picks the tier by "no monthly exists for this year-month yet" rather
+  than "today is the 1st", so a failed run on the 1st doesn't cost the month's restore point.
+- Cost ≈ `(30 + 12) × nightly-size × $0.023/GB`. **These are full backups, not incrementals**, so
+  cost scales with retention × dataset — revisit if shared media reaches tens of GB.
+
+**§6b–§6d DONE and VERIFIED (2026-07-26).** Role `rphaf-relay-backup` is attached to the instance
+and can write cross-account into `rphaf-backup-bucket`. Proven by a probe upload round-trip
+(`rclone copy` → `rclone ls` listed it), not by inference. Gotchas hit on the way, all now in §6d:
+- **`rclone lsd` alone is a false green light** — it exercises only `ListBucket`, and on an empty
+  bucket a *success* prints nothing, indistinguishable from a command that did nothing. Read the
+  exit code, then prove `PutObject` with a probe upload.
+- **IMDSv2 is required**: a token-less `curl` to `169.254.169.254` returns 401 with an empty body,
+  so the old one-liner looked exactly like "no role attached". Get a token first. Also append
+  `; echo` — IMDS sends no trailing newline, so the role name collides with the shell prompt.
+- **`sudo -v` fails on the `ubuntu` account and that's normal** — its password is locked by design;
+  sudo rights come from cloud-init's `NOPASSWD` rule. Ordinary `sudo <cmd>` works. Unrelated to
+  SSH's `PasswordAuthentication no`.
+
+**§6e/§6f DONE + §7 RESTORE DRILL PASSED (2026-07-26).** First real backup ran against the live
+stack: `pg_dump` clean, both volumes archived, tier logic correctly chose `monthly/` (622 KB total,
+all `SHA256SUMS` OK, landed at `relay/monthly/20260726-194024Z`). **The restore drill then restored
+it into a throwaway container: 0 errors, 48 events restored vs 48 live — exact match.** This is the
+first time the backup has been proven restorable rather than assumed.
+- **§7 was dangerous until this branch.** It said "use a scratch box" while giving commands that
+  piped the dump into the **running** `postgres` service and untarred over `buzz-prod_*` volumes.
+  Since `backup.sh` dumps with `--clean --if-exists`, following it on the relay host would have
+  dropped every live object. It's now safe by construction — throwaway container, own volume, and
+  the only production command is a read-only `select count(*)`.
+- **Expect `errors: 0` from the restore**, not a few "does not exist" lines — `--if-exists` is
+  precisely what suppresses those. Anything non-zero deserves reading.
+- **The row-count comparison is the step that matters.** An empty restore produces *no errors* and
+  looks identical to a good one; only comparing counts against production distinguishes them.
+
+**Cron scheduling trap (hit 2026-07-26).** Pasting the schedule line into an empty `crontab -e`
+put it at the *top* of the file with **no trailing newline**, so cron's default comment header glued
+onto the command: `… 2>&1# Edit this file to introduce tasks…`. Cron only honours `#` at the start
+of a line, so the shell saw the redirect target as `1#` — invalid fd, redirection fails,
+`backup.sh` never runs. It fails **silently**: cron mails the error to the local user and there's no
+MTA, so nothing surfaces. Only the stale `LAST_SUCCESS` marker would have caught it. Install the
+entry deterministically instead of editing by hand:
+`( crontab -l 2>/dev/null | grep -v 'backup\.sh' ; echo '15 3 * * * cd /opt/rphaf/deploy/compose && ./backup.sh >> /var/log/buzz-backup.log 2>&1' ) | crontab -`
+then verify with `crontab -l | tail -1 | cat -A` (must end `2>&1$`). §6f now documents the piped
+form and warns off `crontab -e`.
+
+**✅ NIGHTLY BACKUPS ARE LIVE AND CRON-VERIFIED (2026-07-26).** A one-off scheduled run fired on
+time, correctly chose the **`daily/`** tier (July's monthly already existed), and shipped offsite —
+so the branch that runs 30 nights in 31 is exercised, not just the monthly path. **Cron's minimal
+`PATH` found `docker` and `rclone` unaided**, so no `PATH` line is needed in `backup.sh`. Schedule
+is `15 3 * * *` (03:15 UTC); log at `/var/log/buzz-backup.log`; marker at
+`/var/backups/buzz/LAST_SUCCESS`. Every code path in `backup.sh` has now run for real.
+
+**⚠️ The VM must be on this branch's `backup.sh`.** `main`'s version writes to `relay/<TS>/` with no
+tier, matching **neither** lifecycle rule — nothing would ever expire and there'd be no monthly
+tail. The VM is currently checked out on `offsite-backups-and-restore-drill`; **return it to `main`
+once that PR merges** (`git checkout main && git pull`).
+
+**AWS access model (as of 2026-07-26) — read before attempting §6.**
+- Matt's access to the relay's account is an **IAM user the friend created**, not root and not his
+  own account. Console top-right shows `<username> @ <account-alias-or-ID>` (a root login would show
+  an email there instead). **That 12-digit number is the `<RELAY_ACCOUNT_ID>`** §6c's bucket policy
+  needs — it's readable straight off the console, no need to ask for it.
+- **Matt already has his own AWS account** (created before the friend's invite, root login = his own
+  email). So §6a is **unblocked** — no account creation needed. The two accounts are entirely
+  separate: being invited into the friend's did not link or nest them, and **AWS offers no built-in
+  switching**. Different sign-in URLs (generic console → root/own; `https://<account-id>.signin.aws.
+  amazon.com/console` → IAM user/friend's), and the wrong door reads as "locked out of my own
+  account". Set an **account alias** on each so the console top-right names the account instead of
+  showing a bare 12-digit number — cheapest guard against acting in the wrong one.
+- **Likely blocker: an IAM user often can't create IAM roles**, which §6b requires in the *friend's*
+  account. Check early via IAM → Roles → Create role; if unauthorized, the friend either attaches
+  `IAMFullAccess` or creates the role himself from §6b's JSON. Everything else in §6 (bucket,
+  lifecycle, bucket policy) is entirely in Matt's own account and unblocked.
+- **The console holds one identity per browser**, so signing into one account silently signs you out
+  of the other — surfacing as confusing `AccessDenied`s mid-task. §6 alternates accounts four times;
+  set up two browser profiles first. Sign-in URLs differ too: the IAM user needs
+  `https://<account-id>.signin.aws.amazon.com/console`, not the generic console URL.
+
+**`backup.sh` hardening (same change):** `BACKUP_ALERT_CMD` fires once on failure (an EXIT trap
+catches aborts that bypass `die`; a `REPORTED` flag prevents double-reporting); `tar` exit 1 (files
+changed mid-archive) is a warning while 2+ is fatal, instead of the old blanket `|| log "skipped"`
+that let a failed media archive report success; a `LAST_SUCCESS` marker in `BACKUP_DIR` lets you
+detect a run that *never happened* (broken crontab), which alerting alone can't. Remember **no shell
+script is linted anywhere** — these were hand-verified by running every failure path.
 
 ### Managed-Postgres later (the escape hatch)
 Point `DATABASE_URL` at a managed DB and delete the `postgres` service + its `depends_on` in
