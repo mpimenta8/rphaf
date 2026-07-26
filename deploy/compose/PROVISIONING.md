@@ -614,8 +614,10 @@ An `AccessDenied` means §6b or §6c is incomplete — fix it now, not after the
 TOKEN=$(curl -sX PUT http://169.254.169.254/latest/api/token \
   -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
 curl -s -H "X-aws-ec2-metadata-token: $TOKEN" \
-  http://169.254.169.254/latest/meta-data/iam/security-credentials/
+  http://169.254.169.254/latest/meta-data/iam/security-credentials/; echo
 #    -> prints the role name, or nothing if none is attached (fix: §6b, Modify IAM role)
+#    The trailing `; echo` matters: IMDS sends no newline, so without it the role name
+#    collides with your shell prompt (`rphaf-relay-backupubuntu@ip-…`) and reads as empty.
 
 # 2. Role attached but denied? Then the bucket policy (§6c) doesn't name that exact role ARN.
 ```
