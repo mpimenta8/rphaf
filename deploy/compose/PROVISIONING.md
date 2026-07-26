@@ -561,7 +561,7 @@ cross-account setup "should work" but doesn't.
 ### d. On the VM: rclone against the instance role
 
 ```bash
-sudo -v ; curl https://rclone.org/install.sh | sudo bash
+curl https://rclone.org/install.sh | sudo bash
 
 mkdir -p ~/.config/rclone
 cat > ~/.config/rclone/rclone.conf <<'EOF'
@@ -572,6 +572,15 @@ env_auth = true
 region = us-east-1
 EOF
 ```
+
+> **If `sudo` asks for a password here, nothing is wrong.** The `ubuntu` account's password is
+> **locked by design** — its sudo rights come from cloud-init's `NOPASSWD` rule in
+> `/etc/sudoers.d/90-cloud-init-users`, so there is no password to type and none was ever set.
+> Upstream's install line begins `sudo -v ;`, which asks sudo to *authenticate the user* rather than
+> authorize a command and therefore can never succeed against a locked password; it's dropped above
+> for that reason. Ordinary `sudo <command>` works fine — check with `sudo -n true` (`-n` fails
+> instead of prompting). Note this is unrelated to SSH's `PasswordAuthentication no` from §2: one
+> governs remote login, the other local privilege escalation.
 
 `env_auth = true` is the whole point: rclone picks up credentials from EC2 instance metadata, so
 **no key is ever written to disk**. Confirm it works before going further:
