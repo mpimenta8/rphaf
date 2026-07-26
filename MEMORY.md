@@ -178,14 +178,140 @@ value warrants it — it's a one-line `DATABASE_URL` swap, not a rebuild.
   grey-cloud/proxy caveat doesn't apply. Request a plain A record. **IPv4 only at first:** Let's
   Encrypt prefers IPv6 when an AAAA record exists, so an unverified IPv6 path fails cert issuance
   while everything looks healthy over IPv4.
-- **Host: DigitalOcean, $32/mo Premium Intel — 2 vCPU / 4 GB / 120 GB NVMe / 4 TB transfer**, US
-  region. Took NVMe + the larger disk over the $24 Regular SSD tier: Postgres is I/O-sensitive, and
-  disk is what grows (MinIO media) — DO disk resizes are the one change that is *not* reversible.
-  Note the $24 row in DO's *Premium* list is only **2 GB** — not the same as the $24 Regular 4 GB
-  tier the earlier docs cited. Everyone is US-based, and EU hosting's ~90–120ms
-  hurts *media upload/download* specifically (chat send/receive is imperceptible). 4 GB is ~3x the
-  estimated ~1.2 GB steady state for "just chat"; DO's CPU/RAM resize is reversible, so starting
-  small is low-risk.
+- **⚠️ HOST CHANGED 2026-07-25 (late): moving to AWS EC2, in a friend's *personal* account.** He has
+  a pile of **AWS credits to burn**, wants hands-on AWS practice, and Matt gets day-job value from
+  the same — plus it consolidates with Route 53, which already hosts `rphaf.io`. Credits were the
+  explicit tipping point: without them AWS costs *more* than DO (metered egress vs DO's included
+  4 TB) and the call was the other way. Ownership/admin dilution is a **non-issue** here: 15+ year
+  friendship, former roommates.
+  **Live as of 2026-07-25:** instance `rphaf-relay`, `t4g.medium` (ARM Graviton, 2 vCPU / 4 GB),
+  **Ubuntu 26.04 LTS** (the AMI default has moved past 24.04 — docs should say "24.04 LTS or newer"
+  rather than pinning), 120 GB `gp3` **encrypted** with the default `aws/ebs` key, `us-east-1`.
+  SG `rphaf-relay-sg`: 22 = My IP, 80 + 443 = `0.0.0.0/0` (both *must* be world-open — Let's Encrypt
+  validates from unpredictable IPs and friends connect from anywhere). Key pair imported as
+  `rphaf-navi`. **Elastic IP: `34.224.118.116`.** Start at `medium` — resizing to `large` is
+  stop → change instance type → start, with EBS and the EIP surviving intact.
+  - **Encrypt the EBS volume at launch** — you *cannot* encrypt in place later (it's
+    snapshot → copy-with-encryption → swap volumes). Free, and snapshots inherit it.
+  - Set **`Delete on termination: No`** and enable **Termination protection**: both free, and they
+    turn a misclick from "restore everything from backup" into a non-event.
+- **AWS gotchas (the reason this isn't just "same steps, new provider"):**
+  - **An Elastic IP is mandatory.** EC2's auto-assigned public IP **changes on every stop/start**,
+    which would silently break DNS + TLS for everyone. It's also what makes resizing safe, since a
+    resize *requires* a stop/start. Free while attached. The **EIP** is what goes in the A record.
+  - **The Arm architecture selector hides `t4g.*`.** The AMI card defaults to 64-bit x86; switch it
+    to **64-bit (Arm)** *before* picking the instance type or `t4g` won't appear at all. Arm is fine
+    — the whole stack is multi-arch (verified).
+  - **Security Group is *in addition to* `ufw`, not instead of.** If the SG blocks 80/443, Caddy
+    can't complete an ACME challenge and you'll debug a firewall you forgot existed.
+  - **Login user is `ubuntu`, not `root`** — and **§2's user creation should be skipped entirely on
+    AWS.** Canonical's AMI already ships exactly what §2 builds by hand: a non-root sudo user with
+    key-only SSH, root login disabled, password auth disabled. Adding a `buzz` user buys no security
+    and re-takes the lockout risk for nothing. `PROVISIONING.md` uses `$USER` downstream, so
+    `ubuntu` works throughout.
+  - **`get.docker.com` keys off the release codename** and can lag a brand-new Ubuntu. If §4 fails
+    on 26.04, fall back to the previous LTS codename or Ubuntu's own `docker.io` +
+    `docker-compose-v2` packages.
+  - `t4g` is **burstable** (CPU credits, "unlimited" mode on by default) — irrelevant for an idle
+    chat relay, but it's where surprise CPU charges would come from. Set a **billing alarm anyway**,
+    so credits running out arrives as an alert rather than an invoice.
+- **The DO droplet stays alive until the relay is verified on EC2**, then gets cancelled before the
+  next billing date — it's the rollback. For reference it was `rphaf-ubuntu-nyc3`, NYC3, Ubuntu
+  24.04, IPv4 `68.183.145.188`, $32/mo, and it reached: `buzz` user (sudo, key-only SSH),
+  `PermitRootLogin no` + `PasswordAuthentication no` (both verified via `sudo sshd -T`), `ufw` active
+  with default-deny and only 22/80/443 open (v4 **and** v6), 2 GB swap at `vm.swappiness=10`, Docker
+  Compose **v5.3.1**. Idle footprint ~474 MB of 3.8 GB — comfortably under the ~1.2 GB estimate,
+  which is the datapoint that says 4 GB is right-sized. **None of that work is wasted:**
+  `PROVISIONING.md` §2–§4 are provider-agnostic and port to EC2 nearly unchanged.
+- **Docs still describe DigitalOcean.** `PLANNING.md` and `PROVISIONING.md` §1–§2 need rewriting for
+  AWS (keep DO as a documented alternative rather than deleting it).
+- **SSH hardening gotchas, learned the hard way:**
+  - **Verify every step with `sudo sshd -T`, never trust the edit.** A `sed` on
+    `/etc/ssh/sshd_config` silently left `PermitRootLogin yes` in place while we assumed it applied.
+    `sshd -T` prints the *effective* config and is the only real check. Note it needs `sudo` —
+    unprivileged it dies on `/etc/ssh/sshd_config.d/50-cloud-init.conf: Permission denied`.
+  - **Cloud-init already sets `PasswordAuthentication no`** (in that `50-cloud-init.conf`) when the
+    VM is created with an SSH key — so that one was never actually our doing. True on DO; Canonical's
+    AWS AMI goes further and disables root login too.
+  - **`sudo sshd -t` before every `systemctl restart ssh`**; keep a second session open until a
+    third one verifies. A config typo takes the daemon down with no way back in.
+  - **Audit `authorized_keys` — every line is a passwordless path to root.** Started with 2 keys;
+    pruned an ECDSA key belonging to a **work-issued Mac** (IT holds admin/MDM/remote-wipe on it, and
+    it goes back if the job ends). Only the `navi` ed25519 remains — imported into EC2 as the
+    `rphaf-navi` key pair. Also remove retired keys from the **provider account**, or they get
+    re-injected into every future VM.
+  **DNS: DONE 2026-07-25.** `jean.rphaf.io` → **`34.224.118.116`**, confirmed on both the
+  authoritative nameserver and a public resolver. The record had originally been created against the
+  DigitalOcean IP before the AWS pivot and needed only its *value* edited. **Route 53 is in the same
+  AWS account we have access to, so this is self-serve** — Route 53 → Hosted zones → `rphaf.io` →
+  **tick the record's checkbox** (clicking the record *name* doesn't reveal "Edit record", which is
+  what made it look like we lacked permission) → Edit record → change Value. The 300 s TTL made the
+  correction land in minutes; a default 24 h TTL would have cost a day. Verify with
+  `dig +short jean.rphaf.io @ns-886.awsdns-46.net` (authoritative, instant) vs `@1.1.1.1` (what the
+  world — and Let's Encrypt — sees). **Never `./run.sh start` before the public resolver agrees**:
+  Caddy fails the ACME challenge against the wrong host and can burn per-domain rate limits that take
+  hours to reset.
+  **EC2 hardening done:** `ufw` active, default-deny incoming, only 22/80/443 (v4 **and** v6); 2 GB
+  swap; Docker Compose **v5.3.1** installed and usable without `sudo`. Idle at ~485 MB of 3.7 GB —
+  same as the DO box, confirming 4 GB is right-sized. **Ubuntu 26.04 was a non-event** —
+  `get.docker.com` supported it, so the codename-lag worry didn't materialise. **SSH verified via
+  `sudo sshd -T`: `permitrootlogin no`, `passwordauthentication no`.** Hardening is complete —
+  §2/§3/§3b/§4 all done and confirmed.
+- **🎉 THE RELAY IS LIVE (2026-07-25).** `https://jean.rphaf.io/_liveness` returns `ok` over a valid
+  Let's Encrypt cert (`CN=jean.rphaf.io`, valid to 2026-10-23) — **verified from the public
+  internet**, not just from the box. All six containers came up healthy on the first
+  `BUZZ_COMPOSE_TLS=true ./run.sh start`. Full AWS write-up: [`docs/aws-deployment.md`](docs/aws-deployment.md).
+  - **The `/data/git` permission bug did NOT occur** — confirming the upstream fix really does ship
+    in `ghcr.io/block/buzz:main`, as the GHCR revision check predicted.
+  - **You do not need to add yourself as a member.** The relay auto-provisions `RELAY_OWNER_PUBKEY`
+    at first boot with role **`owner`** (which outranks `admin`); `add-member` on your own npub
+    correctly no-ops with "already a member". `list-members` shows `added_by: -` for that row.
+  - **Ignore a `grep CHANGE_ME .env` hit on line 2** — it's a *comment* in the template
+    (`# Copy to .env and replace every CHANGE_ME value…`). `gen-env.sh`'s own check requires
+    `KEY=…CHANGE_ME` and is the authoritative one; trust its "No placeholders left".
+  **Next:** nightly offsite backups (§6 — the last non-negotiable), a restore drill (§7), a billing
+  alarm, cancelling the DO droplet, and `sudo sshd -T` verification on EC2.
+- **⚠️ `BUZZ_COMPOSE_TLS=true` belongs on EVERY `run.sh` invocation that touches containers** —
+  `restart`, `stop`, `upgrade`, not just `start`. Without it Compose loads only the base file, which
+  **excludes Caddy**: you get `WARN Found orphan containers (buzz-prod-caddy-1)`, only 5 of 6
+  containers are managed, and Caddy drifts outside the project. It keeps serving (so TLS looks
+  fine), but the next `upgrade` skips it and anything with `--remove-orphans` deletes it — taking
+  HTTPS down. Reconcile with `BUZZ_COMPOSE_TLS=true ./run.sh restart`.
+- **✅ Desktop client connects (2026-07-25).** After the CORS fix the relay logs show the owner
+  pubkey authenticating, `/query` + `/events` returning 200, events ingesting, and a live WebSocket
+  (`conn_id`, `ws.event` spans). **Fixing CORS alone was enough** — no client change needed. Note the
+  first attempt after the server fix still failed: the app had been running since *before* it, and
+  webviews cache CORS preflights, so **quit and relaunch the app** after any CORS change.
+- **Log noise that is NOT a problem — don't chase these:**
+  - **Postgres `ERROR: partition "events_p2026_07" would overlap partition "events_p_future"`**
+    (repeats for several months, both `events` and `delivery_log`). **Handled by design:**
+    `crates/buzz-db/src/partition.rs:137` catches SQLSTATE `42P17` and treats it as "already
+    ensured", because the fresh schema ships a catch-all `*_p_future` covering `2026-07-01 →
+    MAXVALUE` (`migrations/0001_initial_schema.sql:251`). Postgres logs the rejected statement;
+    the app carries on. Only long-term effect: monthly partitions never get created, so it's one
+    big partition — irrelevant at our volume.
+  - **NIP-29 `PUT_USER` for pubkeys that aren't ours** — those are *channel* members, not *relay*
+    members. `./run.sh list-members` confirmed the roster is still only the owner, and only relay
+    members can connect. Don't confuse the two.
+- **Redis wanted `vm.overcommit_memory=1`** (fork-for-snapshot can fail without it on a small box).
+  Applied via `sudo sysctl vm.overcommit_memory=1` + `/etc/sysctl.d/99-redis-overcommit.conf`.
+  Worth doing on any new host.
+- **`./run.sh logs` follows the stream** (`docker compose logs -f`) — `--tail N` only sets the
+  starting point, so it never exits. For a snapshot use
+  `docker compose --env-file .env -f compose.yml logs --tail 50 relay` and name a service; the
+  unscoped form interleaves all six containers.
+- **CORS bug — fixed 2026-07-25 (commit `07455b291`), worth understanding.** `gen-env.sh` set
+  `BUZZ_CORS_ORIGINS` to the relay domain only, but the desktop app's webview origin is
+  `tauri://localhost` (macOS/Linux) / `http://tauri.localhost` (Windows). The relay then returned no
+  `access-control-allow-origin`, so **every** desktop client — the official upstream build
+  included — failed with `Community rejected: Load failed`. **That string is a *transport* failure,
+  not a membership rejection**; a real denial names your pubkey. Verified fixed: the relay now
+  returns `access-control-allow-origin: tauri://localhost`. Upstream's `.env.example` has the same
+  gap — **worth a PR to `block/buzz`**.
+  - Lesson on risk attribution: this lived in **our deploy tooling**, not the client fork. The fork
+    only hides UI via preview flags ("No Rust/server edits") and cannot cause connection failures.
+    Using upstream client builds would not have prevented it. Deploy-tooling bugs are the real
+    bespoke surface — and they're front-loaded, surfacing loudly during setup.
 - **Hetzner is no longer the pick.** Their **15 June 2026** increase raised CPX/CCX ~2.4–3x: CPX31 is
   now ~$74/mo in the US (dead) and ~$42 in Nuremberg. US locations only offer CPX/CCX, so there's no
   cheap Hetzner-US option at all. The surviving value play is **CAX21 (Arm, 4 vCPU / 8 GB, ~$12/mo)**
@@ -279,6 +405,40 @@ backup** — do the restore drill once (see `PROVISIONING.md` §7).
 ### Managed-Postgres later (the escape hatch)
 Point `DATABASE_URL` at a managed DB and delete the `postgres` service + its `depends_on` in
 `compose.yml`. The relay VM becomes stateless/disposable; backups + PITR become the provider's job.
+
+## Getting the app to friends (builds + signing)
+
+**Full write-up: [`docs/distribution.md`](docs/distribution.md).** The need-to-know:
+
+- **⭐ Upstream publishes public, installable builds — daily.** `gh release list --repo block/buzz`
+  shows `Buzz Desktop v0.4.26` etc. with `.dmg` (aarch64 + x64), `.deb`, `.AppImage`, and a Windows
+  `.exe` marked `alpha-unsigned` (implying the macOS DMGs *are* signed). **Since our relay is stock
+  upstream, the official app connects to `jean.rphaf.io` fine** — the fork's only differentiator is
+  which features are visible. So the pragmatic path is: friends install the **official signed
+  build** (no Gatekeeper dance, no $99, auto-updates), and we keep the fork for branding + gating.
+  Switching later is free and per-person: same relay, same keys, same data.
+- **Our local build works but the DMG step doesn't.** `just desktop-release-build` produced a valid
+  `Buzz.app` (Apple Silicon, ~133 MB) in ~3 min, then failed on `bundle_dmg.sh` — that step drives
+  Finder via AppleScript and dies in a non-interactive shell. The `.app` is complete and runnable;
+  retry the DMG from an interactive terminal if you need one. Confirmed the sidecar stubs are 0-byte
+  as designed.
+- **We build and distribute ourselves.** `just release-desktop` triggers `release.yml` in
+  `block/buzz`, which signs with *Block's* Apple credentials — closed to a fork. Ours is
+  `just desktop-release-build` (already labelled "unsigned, for testing"; note it stubs the
+  sidecar binaries, which is fine only while agents stay gated off).
+- **Decision: desktop-first, unsigned.** macOS/Windows cost the friend one click-through;
+  Linux and Android are clean and free.
+- **Device mix: Matt is on iPhone, most of the crew is on Android.** Android is the cleanest free
+  path, so the majority costs nothing — but iOS is a *near-term* question, not one we can defer
+  indefinitely. For **Matt's own device** there is a free path (Xcode + free Apple ID sideload;
+  SideStore automates the 7-day re-signing), which is enough to test from iOS. The $99 only becomes
+  unavoidable when a *second* iPhone needs in.
+- **iPhone is the only hard paywall** — no free path that survives past 7 days. The $99/yr Apple
+  Developer Program covers **both** Apple platforms (macOS notarization *and* TestFlight), and is
+  the only item in the project with an external queue.
+- **Mobile has NO feature gating** (verified: zero flag references in `mobile/lib`), so shipping
+  Flutter as-is exposes the full Buzz surface on phones while desktop hides it.
+- Signing is **downstream of everything** — `just dev` tests the relay fine without it.
 
 ## Key references
 

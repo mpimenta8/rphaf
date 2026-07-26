@@ -56,10 +56,36 @@ The deploy tooling exists ([`deploy/compose/`](deploy/compose/README.md), with t
 [`PROVISIONING.md`](deploy/compose/PROVISIONING.md)) and the decisions are made; the
 relay just isn't up yet.
 
-- [ ] Provision the VM and deploy the relay
+- [x] Droplet up — Ubuntu 24.04, NYC3
+- [ ] `jean.rphaf.io` A record — waiting on the domain owner
+- [ ] Deploy the relay
 - [ ] Add the boysch as relay members
 - [ ] Nightly backups running, with an offsite target set
 - [ ] Do the restore drill once — a backup nobody has restored isn't a backup
+
+---
+
+## Getting the app to you
+
+Desktop first. Phones later, and not just out of laziness.
+
+We build and hand out the app ourselves — the signed builds come from Block's
+release pipeline, and a fork can't reach those credentials. So installers work,
+they just aren't signed by anyone your OS recognises:
+
+| | What you'll hit |
+|---|---|
+| **Linux** | Nothing. It runs. |
+| **macOS** | Blocked on first launch — System Settings → Privacy & Security → **Open Anyway**. Once. |
+| **Windows** | SmartScreen warning — *More info* → *Run anyway*. |
+| **Android** | Allow installing from unknown sources, once. |
+| **iPhone** | No free path at all. Sideloaded builds die after 7 days; TestFlight needs the $99/yr Apple Developer Program. |
+
+The bigger reason phones wait: **the mobile app has none of the feature gating
+the desktop app has.** The "just chat" strip-down lives entirely in the desktop
+code, so shipping the phone app as-is would put agents, huddles, workflows, and
+projects in your pocket while the desktop hides them. Fixing that means porting
+the gating to Flutter — real work, not a config flag.
 
 **Settled: the relay hostname is `jean.rphaf.io`.** Worth writing down that it's
 expensive to change later. It's baked into the A record, the TLS certificate,

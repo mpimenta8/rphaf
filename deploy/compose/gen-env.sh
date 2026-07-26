@@ -61,6 +61,15 @@ done
 set_kv BUZZ_HUDDLE_AUDIO_AVAILABLE false
 set_kv BUZZ_SERVE_GIT_WEB_GUI false
 
+# Desktop-app webview origins. The Tauri app is NOT served from your domain —
+# its webview origin is `tauri://localhost` (macOS/Linux) or
+# `http://tauri.localhost` (Windows). Omit these and the relay returns no
+# `access-control-allow-origin` header, so every desktop client fails to connect
+# with the unhelpful message "Community rejected: Load failed". This applies to
+# the official upstream build too, not just our own — see
+# `crates/buzz-relay/src/config.rs` (the documented example lists `tauri://localhost`).
+DESKTOP_ORIGINS="tauri://localhost,http://tauri.localhost"
+
 # 3) Identity + domain — filled if provided, else forced to CHANGE_ME.
 set_kv RELAY_OWNER_PUBKEY "${OWNER:-CHANGE_ME_OWNER_PUBKEY_HEX}"
 if [[ -n "$DOMAIN" ]]; then
@@ -68,13 +77,13 @@ if [[ -n "$DOMAIN" ]]; then
   set_kv RELAY_URL "wss://$DOMAIN"
   set_kv BUZZ_MEDIA_BASE_URL "https://$DOMAIN/media"
   set_kv BUZZ_MEDIA_SERVER_DOMAIN "$DOMAIN"
-  set_kv BUZZ_CORS_ORIGINS "https://$DOMAIN"
+  set_kv BUZZ_CORS_ORIGINS "https://$DOMAIN,$DESKTOP_ORIGINS"
 else
   set_kv BUZZ_DOMAIN "CHANGE_ME_your_domain"
   set_kv RELAY_URL "wss://CHANGE_ME_your_domain"
   set_kv BUZZ_MEDIA_BASE_URL "https://CHANGE_ME_your_domain/media"
   set_kv BUZZ_MEDIA_SERVER_DOMAIN "CHANGE_ME_your_domain"
-  set_kv BUZZ_CORS_ORIGINS "https://CHANGE_ME_your_domain"
+  set_kv BUZZ_CORS_ORIGINS "https://CHANGE_ME_your_domain,$DESKTOP_ORIGINS"
 fi
 
 chmod 600 .env
