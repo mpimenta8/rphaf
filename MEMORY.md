@@ -460,6 +460,24 @@ backup** — do the restore drill once (see `PROVISIONING.md` §7).
 - Cost ≈ `(30 + 12) × nightly-size × $0.023/GB`. **These are full backups, not incrementals**, so
   cost scales with retention × dataset — revisit if shared media reaches tens of GB.
 
+**§6b–§6d DONE and VERIFIED (2026-07-26).** Role `rphaf-relay-backup` is attached to the instance
+and can write cross-account into `rphaf-backup-bucket`. Proven by a probe upload round-trip
+(`rclone copy` → `rclone ls` listed it), not by inference. Gotchas hit on the way, all now in §6d:
+- **`rclone lsd` alone is a false green light** — it exercises only `ListBucket`, and on an empty
+  bucket a *success* prints nothing, indistinguishable from a command that did nothing. Read the
+  exit code, then prove `PutObject` with a probe upload.
+- **IMDSv2 is required**: a token-less `curl` to `169.254.169.254` returns 401 with an empty body,
+  so the old one-liner looked exactly like "no role attached". Get a token first. Also append
+  `; echo` — IMDS sends no trailing newline, so the role name collides with the shell prompt.
+- **`sudo -v` fails on the `ubuntu` account and that's normal** — its password is locked by design;
+  sudo rights come from cloud-init's `NOPASSWD` rule. Ordinary `sudo <cmd>` works. Unrelated to
+  SSH's `PasswordAuthentication no`.
+
+**⚠️ The VM must be on this branch's `backup.sh` before the first real backup.** `main`'s version
+writes to `relay/<TS>/` with no tier, which matches **neither** lifecycle rule — nothing would ever
+expire and there'd be no monthly tail. Tiering (`relay/daily/` … `relay/monthly/`) only exists in
+`offsite-backups-and-restore-drill`.
+
 **AWS access model (as of 2026-07-26) — read before attempting §6.**
 - Matt's access to the relay's account is an **IAM user the friend created**, not root and not his
   own account. Console top-right shows `<username> @ <account-alias-or-ID>` (a root login would show
