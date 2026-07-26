@@ -698,19 +698,90 @@ silently, which is why it deserves the alarm.
 
 ## 7. Restore drill (a backup you haven't restored isn't a backup)
 
-On a scratch box or a fresh stack, verify you can actually recover:
+> **☠️ Never restore into the running stack.** `backup.sh` dumps with `--clean --if-exists`, so the
+> SQL **drops every object before recreating it**. Piping it into the live `postgres` service — or
+> untarring a volume archive over `buzz-prod_buzz-minio-data` — destroys production and replaces it
+> with the backup. An earlier version of this section did exactly that while telling you to "use a
+> scratch box", which is how a safety procedure becomes the outage.
+>
+> The drill below is **safe by construction**: it restores into a throwaway container with its own
+> name and its own volume, and never references a `buzz-prod_*` volume or the compose stack.
+
+Run it on the relay host — no scratch box needed, because nothing here touches the live stack.
+
+**a. Pick a backup set and check it against its own manifest.**
 
 ```bash
-# Postgres:
-gunzip -c postgres.sql.gz | docker compose --env-file .env -f compose.yml \
-  exec -T postgres sh -c 'exec psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
-
-# A volume (e.g. media): stop the stack, then repopulate the named volume:
-docker run --rm -v buzz-prod_buzz-minio-data:/data -v "$PWD:/backup" alpine \
-  sh -c 'cd /data && tar xzf /backup/minio-data.tar.gz'
+cd /opt/rphaf/deploy/compose
+BK=$(ls -1d /var/backups/buzz/*/ | tail -1); echo "using $BK"
+( cd "$BK" && sha256sum -c SHA256SUMS )     # every line must say OK
 ```
 
-Do this once now so you trust it later.
+**b. Stand up a throwaway Postgres** — same major version as the stack, its own container name,
+never joined to the compose project:
+
+```bash
+PGU=$(grep -E '^POSTGRES_USER=' .env | cut -d= -f2-)
+PGD=$(grep -E '^POSTGRES_DB=' .env | cut -d= -f2-)
+
+docker run -d --name buzz-restore-drill \
+  -e POSTGRES_USER="$PGU" -e POSTGRES_DB="$PGD" \
+  -e POSTGRES_PASSWORD=throwaway-drill-password \
+  postgres:17-alpine
+sleep 5
+```
+
+**c. Restore into it, and read the errors.**
+
+```bash
+gunzip -c "$BK/postgres.sql.gz" \
+  | docker exec -i buzz-restore-drill psql -U "$PGU" -d "$PGD" > /tmp/restore.log 2>&1
+grep -c '^ERROR' /tmp/restore.log     # a few "does not exist" from --if-exists are normal
+tail -20 /tmp/restore.log
+```
+
+`--clean --if-exists` emits `ERROR: … does not exist` lines when dropping objects that were never
+there — harmless on an empty target. What matters is that the *data* arrives.
+
+**d. Prove the data is actually there — compare against production.**
+
+```bash
+# restored copy
+docker exec buzz-restore-drill psql -U "$PGU" -d "$PGD" -tAc 'select count(*) from events;'
+# live relay
+docker compose --env-file .env -f compose.yml exec -T postgres \
+  psql -U "$PGU" -d "$PGD" -tAc 'select count(*) from events;'
+```
+
+Both `select`s are read-only. The counts should match (or differ by whatever arrived since the
+dump). **A restore that "succeeds" with zero rows is the failure this step exists to catch** — and
+it's invisible in step (c), because an empty restore produces no errors at all.
+
+**e. Check the media archive lists and extracts.**
+
+```bash
+tar tzf "$BK/minio-data.tar.gz" | head
+tar tzf "$BK/git-data.tar.gz"   | head
+```
+
+`tar tz` reads the archive without writing anything, so it cannot touch the live volumes.
+
+**f. Tear the drill down.**
+
+```bash
+docker rm -f buzz-restore-drill
+```
+
+That removes the container and its anonymous volume. Nothing else was ever touched.
+
+### What a real recovery would add
+
+The drill deliberately stops short of a full recovery, because the remaining steps are destructive
+by nature. When actually recovering onto a **fresh** host: restore `.env` from `env.snapshot` first
+(the relay's identity keys live there — a new `BUZZ_RELAY_PRIVATE_KEY` means a different relay),
+bring the stack up so the volumes exist, stop it, untar the volume archives over them, then restore
+Postgres. Order matters: Compose creates the named volumes, so they must exist before you populate
+them.
 
 ## 8. Ongoing ops
 
