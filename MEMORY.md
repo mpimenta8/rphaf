@@ -111,6 +111,10 @@ To **re-enable agents later:** flip the Experiments toggles ON, then run the age
 - **No shell script is linted anywhere** — no shellcheck in the Justfile, lefthook, or the
   workflows, and `just ci` never runs `scripts/dev-setup.sh`. Changes to shell scripts need
   hand-verification (`bash -n`, then actually run the changed lines); CI will not catch them.
+  - **Verify under `bash`, not the macOS prompt.** The local shell is **zsh**, which does *not*
+    word-split unquoted expansions, while our scripts are `#!/usr/bin/env bash` on Linux, which
+    does. Testing `$VAR arg` behaviour at a zsh prompt gives the wrong answer — wrap it in
+    `bash <<'EOF' … EOF` (seen 2026-07-26 while proving `BACKUP_ALERT_CMD` splitting).
 
 - **Hiding UI ≠ deleting data.** The seeded dev community ships a real `@Fizz` agent *member* on the
   relay; feature gates hide agent UI but can't remove identities already in the event log. A fresh
@@ -506,10 +510,23 @@ so the branch that runs 30 nights in 31 is exercised, not just the monthly path.
 is `15 3 * * *` (03:15 UTC); log at `/var/log/buzz-backup.log`; marker at
 `/var/backups/buzz/LAST_SUCCESS`. Every code path in `backup.sh` has now run for real.
 
-**⚠️ The VM must be on this branch's `backup.sh`.** `main`'s version writes to `relay/<TS>/` with no
-tier, matching **neither** lifecycle rule — nothing would ever expire and there'd be no monthly
-tail. The VM is currently checked out on `offsite-backups-and-restore-drill`; **return it to `main`
-once that PR merges** (`git checkout main && git pull`).
+**✅ PR #5 merged (`72f6b0ee7`); the VM is back on `main` with the tiering.** Near-miss worth
+remembering: `git checkout main` **without** `git pull` left the VM on pre-merge `main`, whose
+`backup.sh` writes to `relay/<TS>/` — matching **neither** lifecycle rule, so nothing would ever
+expire and there'd be no monthly tail. Caught only because
+`grep -c 'TIER' deploy/compose/backup.sh` returned **0**. **After any VM checkout, run that grep;
+it must be > 0** before the next 03:15 run.
+
+**Billing alarms: use AWS Budgets, not a CloudWatch billing alarm** (decided 2026-07-26, documented
+as §6i, branch `backup-alerting-and-billing-alarm`). CloudWatch's billing metric requires enabling
+*Receive Billing Alerts* in Billing preferences first, which is **root-only** — and our access to
+the relay account is an IAM user, so that route is blocked there. Budgets needs no preference, mails
+you directly without an SNS topic, and alerts on **forecast** as well as actual, which warns before
+the credits are gone rather than after. Thresholds: **~$10** relay account (credits expiring,
+burstable CPU), **~$5** own account (backup storage). Alert at 85% actual + 100% forecast.
+**§6g alerting is still dormant** — `BACKUP_ALERT_CMD` is unset, so a failed backup currently tells
+nobody; and it can never catch a run that *never happened* (see §6h's `LAST_SUCCESS` / CloudWatch
+`PutRequests` alarm).
 
 **AWS access model (as of 2026-07-26) — read before attempting §6.**
 - Matt's access to the relay's account is an **IAM user the friend created**, not root and not his

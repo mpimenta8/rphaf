@@ -738,16 +738,30 @@ aws sts get-caller-identity --query Account --output text
 cd /opt/rphaf/deploy/compose
 ACCT=$(aws sts get-caller-identity --query Account --output text)
 cat >> backup.env <<EOF
-BACKUP_ALERT_CMD=aws sns publish --region us-east-1 --topic-arn arn:aws:sns:us-east-1:${ACCT}:rphaf-alerts --subject "rphaf backup FAILED" --message
+BACKUP_ALERT_CMD="aws sns publish --region us-east-1 --topic-arn arn:aws:sns:us-east-1:${ACCT}:rphaf-alerts --subject rphaf-backup-FAILED --message"
 EOF
 cat backup.env      # confirm the ARN has a real 12-digit account, not a placeholder
 ```
+
+> **Two things about that value are load-bearing.**
+>
+> **It must be quoted.** Unquoted, `BACKUP_ALERT_CMD=aws sns publish …` is shell syntax for *"run
+> `sns publish …` with `BACKUP_ALERT_CMD=aws` set for that one command"* — so sourcing the file
+> fails with `Command 'sns' not found` and the variable never gets set at all.
+>
+> **No argument inside it may contain spaces.** `backup.sh` runs `$ALERT_CMD "$msg"` unquoted so the
+> command word-splits, and quotes *within* a variable's value are not re-interpreted as quotes after
+> expansion — `--subject "rphaf backup FAILED"` would arrive as four arguments carrying literal
+> quote characters. Hence the hyphenated subject. It costs nothing: `backup.sh` already prefixes the
+> message with `rphaf backup FAILED on <host>:`. If you ever need spaces in an argument, put the
+> command in a wrapper script and point `BACKUP_ALERT_CMD` at that instead.
 
 **6. Prove it delivers**, rather than waiting for a genuine failure to find out:
 
 ```bash
 set -a; . ./backup.env; set +a
-$BACKUP_ALERT_CMD "test alert — rphaf alerting setup, ignore"
+echo "$BACKUP_ALERT_CMD"      # must print the whole command — if it prints "aws", it wasn't quoted
+$BACKUP_ALERT_CMD "test alert - rphaf alerting setup, ignore"
 ```
 
 An email should arrive within seconds. Nothing arriving means the subscription is unconfirmed (step
