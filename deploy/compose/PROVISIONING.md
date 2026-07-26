@@ -702,21 +702,61 @@ goes to `monthly/`, so without this the path that runs 30 nights out of 31 stays
 
 ### g. Alert on failure
 
-`backup.sh` supports an optional `BACKUP_ALERT_CMD`, run only when a backup fails. The cheapest
-useful target is the same **SNS topic** you'll use for the billing alarm — one topic, one email
-subscription, both classes of "you need to know this" arriving the same way.
+`backup.sh` supports an optional `BACKUP_ALERT_CMD`, run only when a backup fails. Until it's set,
+**a failed backup tells nobody** — the alerting path exists but is dormant. Target an **SNS topic**
+in the relay's account. Do these in order; the last step doesn't work without the first three.
 
-Create the topic once (in the relay's account), subscribe your email, confirm the subscription mail,
-then add `sns:Publish` for that topic ARN to the `rphaf-relay-backup` role from §6b and:
+**1. Create the topic** — SNS → Topics → Create topic → type **Standard**, name `rphaf-alerts`.
 
-```bash
-# append to backup.env
-BACKUP_ALERT_CMD=aws sns publish --region us-east-1 --topic-arn arn:aws:sns:us-east-1:<RELAY_ACCOUNT_ID>:rphaf-alerts --subject "rphaf backup FAILED" --message
+**2. Subscribe your email** — on that topic → Create subscription → Protocol **Email** → your
+address. **Then open the confirmation mail and click the link.** AWS silently discards messages to
+unconfirmed subscriptions, so skipping this leaves you with alerting that looks configured and
+delivers nothing.
+
+**3. Let the role publish** — IAM → Roles → `rphaf-relay-backup` → its inline policy → add:
+
+```json
+{ "Effect": "Allow", "Action": "sns:Publish",
+  "Resource": "arn:aws:sns:us-east-1:<RELAY_ACCOUNT_ID>:rphaf-alerts" }
 ```
 
-Requires the AWS CLI on the VM (`sudo snap install aws-cli --classic`). If you'd rather not install
-it, any command taking a message as its final argument works — a [healthchecks.io](https://healthchecks.io)
-`curl` is a fine substitute.
+**4. On the VM, install the CLI and let it resolve the account ID** (this also re-confirms the
+instance role works):
+
+```bash
+sudo snap install aws-cli --classic
+aws sts get-caller-identity --query Account --output text
+```
+
+**5. Append the setting to `backup.env`.**
+
+> ⚠️ **This is a config line, not a command.** Typing it at the shell makes bash read
+> `<RELAY_ACCOUNT_ID>` as an input redirect and fail with `No such file or directory`. Use the
+> heredoc — note `>>` (append, don't clobber) and the *unquoted* `EOF` so `${ACCT}` expands:
+
+```bash
+cd /opt/rphaf/deploy/compose
+ACCT=$(aws sts get-caller-identity --query Account --output text)
+cat >> backup.env <<EOF
+BACKUP_ALERT_CMD=aws sns publish --region us-east-1 --topic-arn arn:aws:sns:us-east-1:${ACCT}:rphaf-alerts --subject "rphaf backup FAILED" --message
+EOF
+cat backup.env      # confirm the ARN has a real 12-digit account, not a placeholder
+```
+
+**6. Prove it delivers**, rather than waiting for a genuine failure to find out:
+
+```bash
+set -a; . ./backup.env; set +a
+$BACKUP_ALERT_CMD "test alert — rphaf alerting setup, ignore"
+```
+
+An email should arrive within seconds. Nothing arriving means the subscription is unconfirmed (step
+2) or the role lacks `sns:Publish` (step 3).
+
+> **Prefer no AWS CLI?** Any command taking the message as its final argument works — a
+> [healthchecks.io](https://healthchecks.io) `curl` is a fine substitute, and has the advantage of
+> being a *dead man's switch*: it alerts when an expected ping fails to arrive, which catches a run
+> that never happened at all. `BACKUP_ALERT_CMD` fires only on failure, so it can't.
 
 ### h. Notice the failures alerting can't see
 
@@ -733,6 +773,32 @@ The first is worth automating: an S3 **CloudWatch alarm** on the bucket's `PutRe
 alerting to the same SNS topic when it drops to zero over 48 hours, catches "the backups quietly
 stopped" without any code on the VM. Everything else on this page fails loudly; that one fails
 silently, which is why it deserves the alarm.
+
+### i. Budget alarms (both accounts)
+
+Two accounts carry cost risk, for different reasons:
+
+| Account | Risk | Threshold |
+|---|---|---|
+| **The relay's** (friend's) | The instance runs on **expiring credits**. When they run out, charges start — and without an alarm that arrives as an invoice rather than a warning. `t4g` is also burstable, so CPU overage lands here. | ~$10/mo |
+| **Yours** (backups) | Runaway storage. Full backups × retention scales multiplicatively, so growing media quietly grows the bill. | ~$5/mo |
+
+**Use AWS Budgets, not a CloudWatch billing alarm.** CloudWatch's billing metric first requires
+enabling *Receive Billing Alerts* in Billing preferences, which is **root-only** — and in the
+relay's account you're an IAM user, so you'd be blocked. Budgets needs no such preference, emails
+you directly without an SNS topic, and can alert on **forecasted** spend, which warns you before the
+money is gone instead of after.
+
+In each account: **Billing and Cost Management → Budgets → Create budget**
+
+- Template **Monthly cost budget**, amount from the table above
+- Alert at **85% of actual** *and* **100% of forecasted** — the forecast alert is the one that gives
+  you warning rather than a post-mortem
+- Recipient: your email
+
+> Check **Billing → Budgets** loads in the relay's account before planning around it. An IAM user
+> often has no billing permissions, in which case the account owner either grants them or creates
+> the budget themselves.
 
 ## 7. Restore drill (a backup you haven't restored isn't a backup)
 
