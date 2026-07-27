@@ -403,8 +403,8 @@ value warrants it — it's a one-line `DATABASE_URL` swap, not a rebuild.
   - **Ignore a `grep CHANGE_ME .env` hit on line 2** — it's a *comment* in the template
     (`# Copy to .env and replace every CHANGE_ME value…`). `gen-env.sh`'s own check requires
     `KEY=…CHANGE_ME` and is the authoritative one; trust its "No placeholders left".
-  **Next:** nightly offsite backups (§6 — the last non-negotiable), a restore drill (§7), a billing
-  alarm, cancelling the DO droplet, and `sudo sshd -T` verification on EC2.
+  (All of that entry's "next" items — backups, restore drill, billing alarm, DO teardown — are
+  **done**; see the ✅ blocks below and "Readiness for beta testers".)
 - **⚠️ `BUZZ_COMPOSE_TLS=true` belongs on EVERY `run.sh` invocation that touches containers** —
   `restart`, `stop`, `upgrade`, not just `start`. Without it Compose loads only the base file, which
   **excludes Caddy**: you get `WARN Found orphan containers (buzz-prod-caddy-1)`, only 5 of 6
@@ -712,21 +712,42 @@ script is linted anywhere** — these were hand-verified by running every failur
 Point `DATABASE_URL` at a managed DB and delete the `postgres` service + its `depends_on` in
 `compose.yml`. The relay VM becomes stateless/disposable; backups + PITR become the provider's job.
 
-## Readiness for beta testers (assessed 2026-07-26)
+## Readiness for beta testers (updated 2026-07-27)
 
-`docs/threat-model.md`'s stated bar — nightly offsite backup plus one real restore — is **met**, so
-inviting people is unblocked in principle. Three things stand between here and two testers:
+`docs/threat-model.md`'s stated bar — nightly offsite backup plus one real restore — is **met**.
+Two of the three blockers are now cleared; testers can be invited.
 
-1. **The README lies to them** — see the `Get in` note above. ~30 min.
-2. **⚠️ The relay has never had more than one member.** Everything so far ran against the single
-   auto-provisioned owner identity: no second member has ever authenticated, no message has passed
-   between two people, no unread/DM/multi-user path is exercised at all. **Self-test with a second
-   identity before inviting anyone** (second macOS user account or another machine is enough).
-   Remember the non-owner join flow is unusual: the app mints a *fresh* key, the relay rejects it,
-   and only the denial screen offers "paste your nsec" — so a friend's real path is install → get
-   denied → read their npub off the denial screen → send it → get added → retry.
+1. **✅ Docs corrected (`c69dbd3ff`, `2b81e0386`).** README `Get in` now gives the real address,
+   points at upstream's signed build, and walks the denial screen. New **`docs/quickstart.md`** is
+   the thing to send testers — join steps plus an honest list of what's unproven.
+2. **✅ MULTI-MEMBER WORKS — second member joined 2026-07-27T04:34Z.** The whole loop ran for real:
+   fresh key → rejected → npub off the denial screen → `./run.sh add-member` → **"Try again" let
+   them straight in, no reinstall or restart**. Verified working between two identities: channel
+   messages, **typing indicators** (so Redis pub/sub genuinely fans out to two subscribers),
+   per-user unread pips, and good latency over the real network. Roster is now owner + 1 member.
+   - **Still unexercised between two people:** DMs (NIP-17 gift wraps — a separate path), threaded
+     replies and the materialized `reply_count`/`descendant_count` counters, reconnect-and-backfill
+     after a client sleeps (**the one that matters most for daily use**), media upload/download,
+     and search over other people's messages.
+   - **`add-member` records no provenance** — `added_by` is empty for CLI-added members (only the
+     owner row is meaningful). Cosmetic now; it's upstream code, so fixing it means carrying a
+     patch or PRing `block/buzz`. Leave it until the roster is big enough to care.
 3. **Nothing watches relay uptime.** Backup failures alert now; a relay that dies at 3am does not.
-   Tolerable for two testers who'll just tell you; not for a real group. Do before widening.
+   Tolerable for a handful of testers who'll just tell you; not for a real group. Do before
+   widening. **Note the circularity:** `quickstart.md` tells testers to report problems *in the
+   relay*, so a relay outage takes the reporting channel with it. Fallback is "text Matt", which
+   stops scaling around ten people.
+
+**The relay is stock upstream with NOTHING switched off** (verified 2026-07-27 via NIP-11: advertises
+nips 1,2,10,11,16,17,23,25,29,33,38,42,50,56,43; git hook HMAC + media configured in `.env`). So
+agents, git hosting, workflow automation, and huddles are all **live**, just unused — the "just
+chat" gating exists only in *this repo's* desktop build, which testers aren't running. An earlier
+draft of the docs claimed they were "not wired up"; that was wrong and is fixed. Testers are told
+they may tinker, with two real caveats: agents spawn local subprocesses (shell + file-edit) on the
+*tester's own machine*, and git/huddles have never once run against this relay.
+
+**Unverified, worth checking:** whether `backup.sh` captures the **git volume** as well as Postgres
+and MinIO. Matters more now that testers may be told git hosting is fair game.
 
 Deferred without much cost: `PLANNING.md`'s AWS rewrite, §6h's "run never happened" alarm, and
 re-scoping the friend's budget once he activates the cost allocation tag.
