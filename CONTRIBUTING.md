@@ -92,8 +92,8 @@ versions in the table above.
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/block/buzz.git
-cd buzz
+git clone https://github.com/mpimenta8/rphaf.git
+cd rphaf
 
 # 2. Activate Hermit (optional but recommended)
 . ./bin/activate-hermit
@@ -324,15 +324,16 @@ to existing clients.
 
 ## Ecosystem
 
-Buzz is developed across multiple repositories. This repo (`block/buzz`)
-is the open-source home for all application code — the relay, desktop app,
-mobile app, CLI, and agent harness. Internal repositories handle
-enterprise-signed builds and infrastructure deployment.
+This repo (`mpimenta8/rphaf`) is a fork of
+[`block/buzz`](https://github.com/block/buzz), the open-source home for all
+application code — the relay, desktop app, mobile app, CLI, and agent harness.
+Upstream is developed across multiple repositories; Block's internal ones handle
+enterprise-signed builds and infrastructure deployment, and we don't use them.
 
 See [AGENTS.md § Ecosystem](AGENTS.md#ecosystem) for the full repo table and
 dependency diagram.
 
-**External contributors:** Fork `block/buzz`, open a PR, and CI runs
+**External contributors:** Fork `mpimenta8/rphaf`, open a PR, and CI runs
 automatically. No special access is required.
 
 **Block team members:** See the internal
