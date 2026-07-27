@@ -17,7 +17,19 @@ fi
 
 GH_USER=$(gh api user --jq .login)
 BRANCH="agent-screenshots/${GH_USER}"
-REPO="block/buzz"
+
+# Derive the repo from `origin` rather than hardcoding it. This script pushes the
+# image blobs to `origin`, so the raw URLs and the PR comment must target that same
+# repo -- a hardcoded value sends both to the wrong place: images 404 (the commit
+# only exists in our repo) and the comment lands on a stranger's PR of the same
+# number. Parsed from the remote, not `gh repo view`, which resolves to the parent
+# for forks. Handles SSH (git@github.com:owner/repo.git) and HTTPS remotes.
+ORIGIN_URL=$(git remote get-url origin)
+REPO=$(printf '%s' "$ORIGIN_URL" | sed -E 's#^.*github\.com[:/]##; s#\.git$##')
+if ! [[ "$REPO" =~ ^[^/]+/[^/]+$ ]]; then
+  echo "error: could not derive owner/repo from origin remote: $ORIGIN_URL" >&2
+  exit 1
+fi
 
 mapfile -t PNGS < <(find "$PNG_DIR" -maxdepth 1 -name "*.png" -type f | sort)
 if [[ ${#PNGS[@]} -eq 0 ]]; then
