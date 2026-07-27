@@ -139,8 +139,8 @@ conversation:
 - **`backup.sh` exists; it is not yet scheduled**, and `BACKUP_RCLONE_REMOTE`
   defaults to empty. The script says it itself: a backup that lives only on the
   same VM does not survive losing the VM.
-- **No restore drill, no alerting, no billing alarm.** Credits running out would
-  arrive as an outage rather than a warning.
+- **No restore drill, no alerting, no billing alarm.** An unnoticed cost increase
+  in an account we don't own would surface as someone else's surprise bill.
 
 **The one thing to do before inviting people is the nightly offsite backup, plus
 one real restore.** Everything else here degrades gracefully. Data loss doesn't.

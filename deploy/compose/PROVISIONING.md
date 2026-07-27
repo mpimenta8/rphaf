@@ -4,7 +4,7 @@ Steps to stand up the rphaf/Buzz relay on a fresh **Ubuntu 24.04 LTS or newer** 
 install Docker, open the firewall, deploy, and wire nightly offsite backups.
 
 **Written for AWS EC2**, which is what the relay actually runs on: a `t4g.medium` in `us-east-1`,
-in a friend's personal account funded by his credits. §3 onward is provider-agnostic and was
+in a friend's personal account. §3 onward is provider-agnostic and was
 originally proven on DigitalOcean; §1–§2 are AWS-specific and call out the DO equivalents where they
 differ. Assumes the `rphaf.io` domain and that you've settled your **owner key** (see `PLANNING.md`
 Part 1 — note `PLANNING.md` itself still recommends DigitalOcean and is pending the same update).
@@ -112,8 +112,8 @@ EC2 → **Launch instance**:
     can't complete its ACME challenge and you'll spend an hour debugging a firewall you forgot
     existed.
 - **`t4g` is burstable** (CPU credits, "unlimited" mode on by default). Irrelevant for an idle chat
-  relay, but it's where a surprise CPU bill would come from — set a billing alarm regardless, so
-  credits running out arrives as an alert and not an invoice.
+  relay, but it's where a surprise CPU bill would come from — set a budget alarm regardless (§6i),
+  especially if the account belongs to someone else.
 
 Then **allocate and associate an Elastic IP** (EC2 → Elastic IPs → Allocate → Associate):
 
@@ -388,10 +388,10 @@ Offsite is **Amazon S3**, in a **different AWS account from the relay**. Three d
 | Decision | Why |
 |---|---|
 | S3, not Backblaze/other | `backup.sh` ships a **full** backup nightly, not an incremental. EC2 → S3 **in the same region is free**; anywhere else is metered egress that grows with your media volume. |
-| A **separate AWS account** you own | The relay runs in a friend's personal account on **expiring credits**. Same-account backups die with that account — suspension, closure, or a falling-out takes the relay *and* its only copy at once. Backups are the one thing that must outlive the host account. |
+| A **separate AWS account** you own | The relay runs in a friend's personal account. Same-account backups die with that account — closure, a billing lapse, a falling-out, or him simply moving on takes the relay *and* its only copy at once. Backups are the one thing that must outlive the host account, however it's funded. |
 | Instance role, **no stored key** | The alternative is a long-lived access key sitting in `backup.env` on an internet-facing host. An EC2 instance role gives S3 access with zero stored credentials, rotated by AWS. |
 
-Cost is ~$1–2/month at this scale — not covered by the friend's credits, and deliberately so.
+Cost is ~$1–2/month at this scale, on your own card — deliberately, since that's the point.
 
 > **Region matters.** The bucket **must** be in the relay's region (`us-east-1`). Same-region
 > transfer is free *even across accounts*; a bucket elsewhere silently puts every nightly full
@@ -810,7 +810,7 @@ Two accounts carry cost risk, for different reasons:
 
 | Account | Risk | Threshold |
 |---|---|---|
-| **The relay's** (friend's) | The instance runs on **expiring credits**. When they run out, charges start — and without an alarm that arrives as an invoice rather than a warning. `t4g` is also burstable, so CPU overage lands here. | ~$10/mo |
+| **The relay's** (friend's) | **It's someone else's money.** Running in a friend's account means an unnoticed cost increase quietly eats budget he set aside for his own use — the alarm is as much courtesy as protection. `t4g` is burstable, so CPU overage lands here. | ~$10/mo |
 | **Yours** (backups) | Runaway storage. Full backups × retention scales multiplicatively, so growing media quietly grows the bill. | ~$5/mo |
 
 **Use AWS Budgets, not a CloudWatch billing alarm.** CloudWatch's billing metric first requires
@@ -849,11 +849,11 @@ the relay's `Name = rphaf-relay`.
 > reaching for a `Service = EC2` filter — that scopes wrongly in both directions, missing the
 > relay's S3/EBS/data-transfer costs while still catching any EC2 the owner runs.
 
-**Credits change when the alarm fires.** With credits applied (the default), net cost sits near $0
-while they last, so the budget stays silent and only speaks once they're exhausted — an accurate
-"you are being charged now" alarm with no advance warning. Unchecking **Credits** under Advanced
-options instead shows the true gross run rate immediately, so you learn what the bill *will* be
-months before it arrives. On a credit-funded account, prefer the latter.
+> **If the account is ever credit-funded, mind the Credits toggle.** With promotional credits
+> applied (the default), net cost sits near $0 while they last, so the budget stays silent and only
+> speaks once they're exhausted — accurate, but no advance warning. Unchecking **Credits** under
+> Advanced options shows the true gross run rate instead. Not applicable to our accounts, which are
+> funded with ordinary money, so gross and net match and the default reports real spend from day one.
 
 ## 7. Restore drill (a backup you haven't restored isn't a backup)
 
