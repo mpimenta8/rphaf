@@ -830,6 +830,31 @@ In each account: **Billing and Cost Management → Budgets → Create budget**
 > often has no billing permissions, in which case the account owner either grants them or creates
 > the budget themselves.
 
+**Budgets cannot break anything.** They are notification-only: they watch spend and email you. The
+opt-in **budget actions** feature *can* stop instances or attach restrictive IAM policies, but you
+must configure it deliberately. Leave it alone and the budget is inert monitoring — safe to create
+in someone else's account.
+
+**Scoping in an account you don't own.** An unfiltered budget tracks **total account spend**, so in
+a shared account it alerts on the owner's unrelated costs and gives you incidental visibility into
+their bill. Scope it via Budget scope → *Filter specific AWS cost dimensions* → **Tag**, matching
+the relay's `Name = rphaf-relay`.
+
+> **The tag won't appear in the filter list until it's activated as a cost allocation tag**
+> (Billing → Cost allocation tags) — which needs **billing-console access**, so an IAM user in
+> someone else's account can't do it. Ask the owner. Allow up to 24 hours for it to become
+> filterable, and expect it to apply **going forward** rather than retroactively.
+>
+> Until then, leave the budget **account-wide and tell the account owner it exists** rather than
+> reaching for a `Service = EC2` filter — that scopes wrongly in both directions, missing the
+> relay's S3/EBS/data-transfer costs while still catching any EC2 the owner runs.
+
+**Credits change when the alarm fires.** With credits applied (the default), net cost sits near $0
+while they last, so the budget stays silent and only speaks once they're exhausted — an accurate
+"you are being charged now" alarm with no advance warning. Unchecking **Credits** under Advanced
+options instead shows the true gross run rate immediately, so you learn what the bill *will* be
+months before it arrives. On a credit-funded account, prefer the latter.
+
 ## 7. Restore drill (a backup you haven't restored isn't a backup)
 
 > **☠️ Never restore into the running stack.** `backup.sh` dumps with `--clean --if-exists`, so the

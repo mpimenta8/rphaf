@@ -517,6 +517,21 @@ expire and there'd be no monthly tail. Caught only because
 `grep -c 'TIER' deploy/compose/backup.sh` returned **0**. **After any VM checkout, run that grep;
 it must be > 0** before the next 03:15 run.
 
+**✅ Budgets created in BOTH accounts (2026-07-26).** Own account: $5/mo, properly scoped (it's all
+ours). Relay account: $10/mo but **account-wide, not scoped to the relay** — the `Name=rphaf-relay`
+tag can't be used as a filter until it's activated as a **cost allocation tag**, which needs
+billing-console access the IAM user doesn't have. **Open action: ask the friend to activate it**
+(then re-scope; allow 24h, and it applies forward rather than retroactively), and **tell him the
+budget exists** since account-wide means it counts his other spend and shows Matt his total bill.
+Deliberately *not* using a `Service = EC2` filter as a stopgap — it scopes wrongly both ways
+(misses the relay's S3/EBS/transfer, still catches his EC2).
+- **Budgets are notification-only and cannot break anything** — safe to create in someone else's
+  account. Only the opt-in *budget actions* feature can stop instances or attach IAM policies, and
+  that must be configured deliberately.
+- **On a credit-funded account, uncheck Credits** (Advanced options): with credits applied, net cost
+  sits at ~$0 and the budget stays silent until they're exhausted — accurate but zero warning.
+  Excluding credits surfaces the true gross run rate months ahead.
+
 **Billing alarms: use AWS Budgets, not a CloudWatch billing alarm** (decided 2026-07-26, documented
 as §6i, branch `backup-alerting-and-billing-alarm`). CloudWatch's billing metric requires enabling
 *Receive Billing Alerts* in Billing preferences first, which is **root-only** — and our access to
