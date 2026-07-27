@@ -44,14 +44,27 @@ Working notes for humans (and agents) collaborating on this fork. This is a
   (`. ./bin/activate-hermit`) or the hooks fail with `just: command not found`.
 
 ### Syncing upstream (proven clean)
-- Cadence: **sync often** — small, frequent merges beat one giant catch-up.
-- Verified end-to-end once already: merged **36 upstream commits (→ v0.4.25) with ZERO conflicts**;
-  our gating survived; full test suite green. Strategy A works — this is the payoff.
+- Cadence: **sync often** — small, frequent merges beat one giant catch-up. Note this matters
+  *more*, not less, now that we're dropping the app fork: staying close to upstream is the whole
+  point, and the cost of a merge scales with how long you waited, not with how much you changed.
+- **`git fetch` alone only fetches `origin`** — it will happily report "up to date" while upstream
+  moves. You must name the remote: **`git fetch upstream`**.
+- Verified end-to-end **twice**: 36 commits (→ v0.4.25), then **27 commits on 2026-07-26 (merge
+  base `499c5d349` → `63c62fcf3`), again ZERO conflicts**, gating intact, deploy/docs untouched.
 - Recipe: `git fetch upstream && git merge --no-edit upstream/main`, then `just ci` (or at least
   `cd desktop && pnpm typecheck && pnpm check`), then `git push origin main`.
+- **A clean merge is a textual result, not a semantic one.** Zero conflicts only means neither side
+  edited the same lines — it does **not** mean the result is right, and no marker will warn you.
+  Concretely, the 2026-07-26 merge silently pulled upstream prose into `CONTRIBUTING.md` pointing
+  contributors at **block/buzz's issue tracker** ("open an issue", "search open PRs", "Buzz is an
+  agent platform"). **`README.md` is the only file protected by `merge=ours`** — `CONTRIBUTING.md`
+  and `AGENTS.md` are not, so re-read them for brand/identity drift after every sync.
 - **Also check what the README driver swallowed:** `git diff HEAD upstream/main -- README.md`.
   `merge=ours` keeps our README with no conflict and no notice, so this is the only way upstream's
   README changes ever surface. Do it as part of the merge, not "occasionally" — otherwise never.
+  (Checked 2026-07-26: discarded a 206-line upstream README rewrite — working as intended.)
+- **Upstream now requires DCO sign-off** (`dc1646fcb`) and ships a `commit-msg` hook to enforce it.
+  New commits need a `Signed-off-by` trailer: **`git commit -s`**.
 - Low-but-nonzero future risk: if upstream edits the *exact lines* we gated (e.g. the agents nav
   item, the `HuddleBar` mount), expect a **small** conflict — re-apply the `<FeatureGate>` wrap around
   their new code. Minutes, not days.
@@ -74,7 +87,28 @@ Notes:
   **"Always Allow"** (unsigned dev builds re-prompt after a rebuild; that's expected, not malware).
 - Closing the app window ends the whole `just dev` session.
 
-## The "just chat" strip-down (Strategy A — disable, don't delete)
+## The "just chat" strip-down (Strategy A — ❌ REVERTED 2026-07-26, kept as history)
+
+> **Decision 2026-07-26: stopped maintaining an app-level fork.** We run **stock Buzz** as a
+> group and **keep self-hosting the relay** (that part is critical and unaffected). Reasons:
+> budget, complexity, stress. **Done** on branch `sync-upstream` (`0ff594e7b`), `just ci` green:
+> 9 files restored to upstream, so `desktop/` + `preview-features.json` are now **byte-identical
+> to upstream**. Agents, huddles, mesh-compute and agent-memory are visible again.
+> `scripts/dev-setup.sh` was **deliberately excluded** — its 13 lines configure the README
+> `merge=ours` driver (branding), nothing to do with feature flags. Reverting it would have
+> silently broken README protection on fresh clones.
+> Total remaining non-doc divergence from upstream: **24 lines** across `.gitattributes`,
+> `.gitignore`, `scripts/dev-setup.sh`.
+>
+> What made this easy: the fork's app footprint was **+135/−53 across 10 files**, ~3% of the
+> work. The other 96% (**+3,598 lines** of `deploy/`, `docs/`, backups, alerting, threat model) is
+> **self-hosting infrastructure and stays**. Dropping the app fork ≠ dropping the deployment —
+> they turned out to be fully separable, with zero file overlap.
+> Also note `preview-features.json` is **upstream's own file**, not ours; we only added 4 entries
+> to a mechanism Buzz already ships. There was never a "rewrite" to undo.
+>
+> Reversible either way: `git revert` restores the gating; the section below stays as the record
+> of how it worked.
 
 Branch `just-chat-strip-down`. We **hide** non-chat features behind the existing desktop
 preview-flag system rather than deleting code — so everything is re-enableable and upstream
@@ -129,7 +163,11 @@ To **re-enable agents later:** flip the Experiments toggles ON, then run the age
 
 ## Roadmap
 
-- **Fold agents back in** (Experiments toggle + run agent processes).
+- **⚠️ Pending: land `sync-upstream` on `main`.** The branch holds the 27-commit upstream merge,
+  the fork revert (`0ff594e7b`), and a MEMORY.md commit; `just ci` is green. **Not yet merged or
+  pushed** — `main` is still at `c6a9fdffd`. Also still open: the `CONTRIBUTING.md` brand drift
+  the merge introduced (block/buzz issue links).
+- ~~**Fold agents back in**~~ — moot once the gating is reverted; stock Buzz ships agents visible.
 - **Brand pass — docs only, MERGED to `main`** 2026-07-25 as `59e2f3068`
   (squash of **[PR #2](https://github.com/mpimenta8/rphaf/pull/2)** — the 14 individual commits and
   their reasoning live on the PR page, not in `git log`), `just ci` green
