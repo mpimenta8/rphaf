@@ -58,11 +58,11 @@ new person with a new npub. That's the tradeoff for running our own thing.
 
 ## The rest of Buzz is right there
 
-The upstream build ships the full surface: AI agents as room members, git
-hosting, workflow automation, voice huddles. Our relay is stock upstream with
-nothing switched off, so **all of it is live** — we simply haven't used any of
-it. Our own build hides it behind Settings → Experiments to keep the day-to-day
-simple; the build you just installed doesn't.
+The upstream build ships a much larger surface than we use: AI agents as room
+members, workflow automation, voice huddles. Our relay is stock upstream with
+nothing switched off, so it's all there — we simply haven't used any of it. Our
+own build hides it behind Settings → Experiments to keep the day-to-day simple;
+the build you just installed doesn't.
 
 Day to day, rphaf is chat: channels, threads, DMs, search, files. But if you
 want to tinker, tinker. You'd be the first, and we'd genuinely like to know what
@@ -73,9 +73,8 @@ Two things to know before you do:
 - **Agents run on your machine, not the relay.** The ACP harness spawns local
   subprocesses with shell and file-edit tools. That's fine if you're expecting
   it and surprising if you aren't.
-- **Git hosting and huddles have never been exercised here.** Not "known
-  broken" — just never once tried against this relay. Assume nothing, and
-  don't put anything you care about in a repo hosted on it yet.
+- **Huddles have never been exercised here.** Not "known broken" — just never
+  once tried against this relay. Assume nothing.
 
 If you break something, that's a useful result. Say what you did.
 

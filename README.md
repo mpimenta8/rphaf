@@ -38,9 +38,9 @@ using any of that yet, and our own build keeps it out of the way behind
 
 That gating is in *this* repo's build, though. The app you're told to install
 below is upstream's, so you'll see the full Buzz surface — agents, repos,
-huddles, all of it. And since our relay is stock upstream with nothing switched
-off, it all works. We just don't use it. Day to day, rphaf is channels,
-threads, DMs, search, and files; the rest is there if someone wants to play.
+huddles, all of it. Our relay is stock upstream with nothing switched off, so
+it's all there; we just don't use it. Day to day, rphaf is channels, threads,
+DMs, search, and files.
 
 ---
 
