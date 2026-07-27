@@ -2,7 +2,6 @@ import * as React from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Bot, Check } from "lucide-react";
 
-import { useFeatureEnabled } from "@/shared/features";
 import { cn } from "@/shared/lib/cn";
 
 const WELCOME_PERSONA_NAMES = ["Fizz"] as const;
@@ -302,9 +301,7 @@ export function WelcomeComposerBanner({
   settingUp = false,
   state,
 }: WelcomeComposerBannerProps) {
-  // Persona-agent onboarding hint — hidden in "just chat" builds.
-  const agentsEnabled = useFeatureEnabled("agents");
-  if (!agentsEnabled || state === "hidden") {
+  if (state === "hidden") {
     return null;
   }
 
