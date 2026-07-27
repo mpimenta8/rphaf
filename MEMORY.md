@@ -43,6 +43,21 @@ Working notes for humans (and agents) collaborating on this fork. This is a
 - Pre-push hooks run clippy + unit tests (Rust, desktop, Tauri, mobile). **Activate hermit first**
   (`. ./bin/activate-hermit`) or the hooks fail with `just: command not found`.
 
+### Branch hygiene (near-miss 2026-07-26)
+
+**A local branch can be the only copy of work, silently.** GitHub deletes the head branch when a
+PR merges, so `origin/<branch>` disappears — but any commits you made *after* the PR merged, and
+never pushed, then exist **nowhere but your laptop**. Exactly what happened to
+`offsite-backups-and-restore-drill`: two commits recording the DO teardown, remote already gone.
+They were nearly deleted as "cleanup" and are now merged (`fac9f2756`).
+
+- `git branch -a` looked reassuring but was **stale** — remote-tracking refs are a cache from the
+  last fetch, not a live query. `git fetch origin --prune` is what tells the truth.
+- Always `git branch --no-merged main` before deleting anything, and delete with **`-d`, never
+  `-D`** — `-d` refuses unmerged branches, which is the whole safety net.
+- `git branch -a` also lists ~450 read-only `upstream/*` refs. Noise, not ours, leave them; plain
+  `git branch` shows only ours.
+
 ### Syncing upstream (proven clean)
 - Cadence: **sync often** — small, frequent merges beat one giant catch-up. Note this matters
   *more*, not less, now that we're dropping the app fork: staying close to upstream is the whole
