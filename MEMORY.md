@@ -141,6 +141,10 @@ To **re-enable agents later:** flip the Experiments toggles ON, then run the age
   app strings, no relay config.**
   - Standing constraint for anything outward-facing: **nothing may claim a feature that's gated off or
     a relay that isn't running.** The README's "Not live yet" marker stays until the relay is up.
+    **⚠️ The relay IS up now, so that marker is stale and the constraint has flipped — README
+    `## Get in` (line ~55) currently tells friends "the relay isn't deployed", and point 1 tells them
+    to build from this repo, when the settled decision is that they install the **official upstream
+    build**. Both are wrong and it's the first thing a beta tester reads. Fix before inviting.**
   - New prose — docs, UI copy, commit messages — follows `IDENTITY.md`. Code keeps its `buzz` names.
   - *Get in* points at the **`#rphaf-dev` Slack channel** for both relay status and sending your
     npub — deliberately a channel, not a person, so onboarding doesn't route through one human.
@@ -601,6 +605,25 @@ script is linted anywhere** — these were hand-verified by running every failur
 ### Managed-Postgres later (the escape hatch)
 Point `DATABASE_URL` at a managed DB and delete the `postgres` service + its `depends_on` in
 `compose.yml`. The relay VM becomes stateless/disposable; backups + PITR become the provider's job.
+
+## Readiness for beta testers (assessed 2026-07-26)
+
+`docs/threat-model.md`'s stated bar — nightly offsite backup plus one real restore — is **met**, so
+inviting people is unblocked in principle. Three things stand between here and two testers:
+
+1. **The README lies to them** — see the `Get in` note above. ~30 min.
+2. **⚠️ The relay has never had more than one member.** Everything so far ran against the single
+   auto-provisioned owner identity: no second member has ever authenticated, no message has passed
+   between two people, no unread/DM/multi-user path is exercised at all. **Self-test with a second
+   identity before inviting anyone** (second macOS user account or another machine is enough).
+   Remember the non-owner join flow is unusual: the app mints a *fresh* key, the relay rejects it,
+   and only the denial screen offers "paste your nsec" — so a friend's real path is install → get
+   denied → read their npub off the denial screen → send it → get added → retry.
+3. **Nothing watches relay uptime.** Backup failures alert now; a relay that dies at 3am does not.
+   Tolerable for two testers who'll just tell you; not for a real group. Do before widening.
+
+Deferred without much cost: `PLANNING.md`'s AWS rewrite, §6h's "run never happened" alarm, and
+re-scoping the friend's budget once he activates the cost allocation tag.
 
 ## Getting the app to friends (builds + signing)
 
