@@ -52,8 +52,13 @@ Checked, not assumed:
 - **Admins have no DM override.** `handle_dm_add_member` requires the caller to
   *already be a participant* before adding anyone. There is no role-based bypass
   — being an admin does not let you join a conversation you weren't in.
-- **DMs are excluded from the search index** at the storage layer, alongside
-  gift wraps, reminders, and membership notices.
+- **Search can't cross a channel boundary.** Every FTS query is scoped to the
+  caller's accessible channels (`ChannelScope`, `crates/buzz-search/src/query.rs`),
+  so search is no weaker than a plain read. Note this is a *query-time* control,
+  not an indexing one: gift wraps and DM visibility state are kept out of the
+  tsvector, but **DM message bodies are indexed like any other kind-9 event**.
+  Against another member that's fine; against the operator it means DM plaintext
+  exists in two places, not one.
 - **The relay is closed.** Unknown pubkeys are rejected at connect. A stranger
   who finds `jean.rphaf.io` cannot enumerate anything.
 
@@ -89,17 +94,34 @@ codebase has NIP-44 primitives available.
 What's missing is the client. **No client publishes gift wraps for DMs today**;
 the only reference to `1059` outside the relay is the desktop E2E mock bridge.
 
-Closing that gap is real work, and the hard part isn't the crypto:
+Closing that gap is real work, but less of it than this section used to claim.
+Taking the blockers one at a time:
 
-- client-side key handling and decryption on the message path
-- **multi-device** — a second machine can't read history it has no key for
-- **search and notifications** degrade; the server can't index or preview what
-  it can't read
-- **no recovery.** Today a lost `nsec` costs you your account. With E2E DMs it
+- **Client-side key handling and decryption on the message path.** Real work,
+  though not new ground — NIP-44 already ships in both clients
+  (`desktop/src-tauri/src/commands/identity.rs`,
+  `mobile/lib/shared/crypto/nip44.dart`) for read state, mutes, and stars.
+- **Multi-device — mostly already solved.** This is a genuine blocker only where
+  each device holds its own key. Identity here is a *single* keypair, and NIP-AB
+  pairing moves it between devices; gift wraps are addressed to that pubkey and
+  stored server-side, so a newly paired device syncs and decrypts full history.
+- **Notifications — already handled.** `1059` is in `PUSH_KINDS`
+  (`handlers/push_lease.rs`), and `push_runtime.rs` restricts a lease to wraps
+  addressed to its own author precisely so wake timing doesn't leak recipient
+  activity. Delivery survives; only server-generated *preview text* is lost.
+- **Search — the real cost.** DM bodies are in the FTS index today (see above),
+  so this is the one capability that genuinely disappears. Replacing it means a
+  client-side index over decrypted messages.
+- **No recovery.** Today a lost `nsec` costs you your account. With E2E DMs it
   also costs you every conversation, permanently.
 
-That last point is the honest trade: real DM privacy makes the "I lost my key"
-failure strictly worse.
+So the remaining blockers are one engineering cost (search) and one product
+decision (recovery). That last point is the honest trade: real DM privacy makes
+the "I lost my key" failure strictly worse.
+
+See [`dm-privacy.md`](dm-privacy.md) for the group-facing version of this
+question and the proposed path — including why the client work should go
+upstream rather than into this fork.
 
 ## Where we've landed
 
@@ -113,7 +135,9 @@ radius. Real E2E DMs stay on the roadmap, not the critical path.**
 2. **Keep SSH to one or two people**, audit `authorized_keys`, and encrypt
    offsite backups separately from the host.
 3. **Treat gift-wrapped DMs as a named roadmap item.** The server side is done;
-   it's client work, and it needs the multi-device and recovery answers first.
+   it's client work, and it needs an answer on DM search and a group decision on
+   unrecoverable history. It should land upstream rather than in this fork —
+   see [`dm-privacy.md`](dm-privacy.md).
 
 ## Identity is the other sharp edge
 
@@ -147,6 +171,9 @@ one real restore.** Everything else here degrades gracefully. Data loss doesn't.
 
 ## See also
 
+- [`dm-privacy.md`](dm-privacy.md) — the group-facing answer to "can you read my
+  DMs?", the path to end-to-end encryption, and corrections to the
+  "why it isn't end-to-end encrypted yet" section above
 - [`aws-deployment.md`](aws-deployment.md) — what's running, security posture, operating it
 - [`distribution.md`](distribution.md) — how builds reach people
 - [`../deploy/compose/PROVISIONING.md`](../deploy/compose/PROVISIONING.md) — the runbook, including backups
