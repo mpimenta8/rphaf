@@ -147,6 +147,9 @@ one real restore.** Everything else here degrades gracefully. Data loss doesn't.
 
 ## See also
 
+- [`dm-privacy.md`](dm-privacy.md) — the group-facing answer to "can you read my
+  DMs?", the path to end-to-end encryption, and corrections to the
+  "why it isn't end-to-end encrypted yet" section above
 - [`aws-deployment.md`](aws-deployment.md) — what's running, security posture, operating it
 - [`distribution.md`](distribution.md) — how builds reach people
 - [`../deploy/compose/PROVISIONING.md`](../deploy/compose/PROVISIONING.md) — the runbook, including backups
