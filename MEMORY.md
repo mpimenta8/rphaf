@@ -65,9 +65,52 @@ Working notes for humans (and agents) collaborating on this fork. This is a
   (Checked 2026-07-26: discarded a 206-line upstream README rewrite — working as intended.)
 - **Upstream now requires DCO sign-off** (`dc1646fcb`) and ships a `commit-msg` hook to enforce it.
   New commits need a `Signed-off-by` trailer: **`git commit -s`**.
-- Low-but-nonzero future risk: if upstream edits the *exact lines* we gated (e.g. the agents nav
-  item, the `HuddleBar` mount), expect a **small** conflict — re-apply the `<FeatureGate>` wrap around
-  their new code. Minutes, not days.
+- The old "upstream may edit the exact lines we gated" risk is **gone** — nothing is gated anymore.
+
+### Upstream references leak (swept 2026-07-26)
+
+Upstream's docs and scripts name `block/buzz` and `squareup/*` throughout. Merging pulls those in
+silently, and they're wrong-to-dangerous in a fork. Fixed this round:
+
+- `CONTRIBUTING.md` — issue/PR links, the `git clone` command, the Ecosystem section, and the
+  AI-PR paragraph all pointed at block. Also **deleted** the "Block team members" onboarding
+  pointer (`squareup/sprout-releases` — inaccessible to us; it took a `RELEASING.md` link with it).
+- `AGENTS.md` — five-repo Block ecosystem table replaced with rphaf's real shape; the screenshot
+  cleanup snippet told agents to `gh api -X DELETE` comments **on block/buzz**.
+- **`scripts/post-screenshots.sh` was genuinely broken** (`REPO="block/buzz"` hardcoded): it pushes
+  blobs to `origin` but built raw URLs and posted the PR comment against block/buzz — so images
+  404'd and the comment targeted an unrelated upstream PR of the same number. Now derived from the
+  `origin` remote, with a parse guard. **Use the remote, not `gh repo view`** — the latter resolves
+  to the *parent* for forks and reintroduces the bug.
+- Lesson: **stale constants in scripts are invisible until they run.** Prose reads obviously wrong;
+  a hardcoded repo doesn't.
+
+**`scripts/` sweep complete (2026-07-26) — nothing left to fix.** All 42 files checked for
+`block/buzz`, `squareup`, `sprout-`, `block-coder`, `ghcr.io/block`, `artifactory`, `blox`.
+The useful distinction is **fail-open vs fail-closed**:
+
+- `post-screenshots.sh` was the **only fail-open** case — it acted on the wrong repo without
+  checking. Fixed.
+- The mobile-release path is **fail-closed and should stay untouched**: `mobile-release.sh:116`
+  runs `require_canonical_repository || exit 1` before its `gh workflow run --repo block/buzz`
+  at 134, and `publish-mobile-release-candidate.sh` guards twice (line 18, and
+  `require_release_tag_ruleset` at 25). In our fork they refuse to run — correct behaviour.
+  Editing them buys nothing and adds permanent merge friction.
+- `test-mobile-release-*.sh` — `block/buzz` is **mocked `gh` fixture data** asserting those
+  guards work. Changing it breaks the tests.
+- `sprout-*` in `dev-setup.sh` / `reset-desktop-dev-state.sh` are legacy **local container and
+  keychain names**, not repo references. Same for the comment in `scripts/cutover/*.sql`.
+- `check-pr-image-urls.sh` **is not a gap** (checked — it looked like one): its primary pattern is
+  host-agnostic (`https?://…/media/<64hex>.<ext>`), so it already catches *our* relay's media URLs.
+  The `sprout-oss` line beside it is just a redundant extra.
+
+### Keep `AGENTS.md` close to upstream (policy)
+
+`CLAUDE.md` is a **symlink to `AGENTS.md`**, so it loads into every agent session — errors there
+become instructions agents act on. It's also high-churn upstream and has **no `merge=ours`
+protection**. So: fix what's wrong, but **don't grow rphaf prose in it** (currently ~6 lines) —
+put fork-specific agent guidance in **this file** instead. And do **not** add `AGENTS.md merge=ours`:
+that would silently discard upstream's agent conventions, the same failure we just cleaned up.
 
 ## Running it locally
 
@@ -163,10 +206,11 @@ To **re-enable agents later:** flip the Experiments toggles ON, then run the age
 
 ## Roadmap
 
-- **⚠️ Pending: land `sync-upstream` on `main`.** The branch holds the 27-commit upstream merge,
-  the fork revert (`0ff594e7b`), and a MEMORY.md commit; `just ci` is green. **Not yet merged or
-  pushed** — `main` is still at `c6a9fdffd`. Also still open: the `CONTRIBUTING.md` brand drift
-  the merge introduced (block/buzz issue links).
+- ✅ **Upstream sync + de-forking LANDED and pushed** 2026-07-26 (`main` → `cd1a45388`).
+  App code is byte-identical to upstream; `just ci` was green at the merge. All follow-up
+  brand/reference fixes are in too (see "Upstream references leak" below).
+- ✅ **`scripts/` swept** 2026-07-26 — `post-screenshots.sh` was the only real breakage; everything
+  else is guarded, fixture data, or unrelated local naming. See "Upstream references leak" above.
 - ~~**Fold agents back in**~~ — moot once the gating is reverted; stock Buzz ships agents visible.
 - **Brand pass — docs only, MERGED to `main`** 2026-07-25 as `59e2f3068`
   (squash of **[PR #2](https://github.com/mpimenta8/rphaf/pull/2)** — the 14 individual commits and
