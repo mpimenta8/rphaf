@@ -110,9 +110,10 @@ lands? Those are the two decisions. Everything else is our problem, not yours.
 
 ## Part 2 — technical appendix
 
-For whoever wants to check the reasoning or do the work. This corrects three
-claims in [`threat-model.md`](threat-model.md) that made end-to-end encryption
-look more expensive than it is.
+For whoever wants to check the reasoning or do the work. Three claims in
+[`threat-model.md`](threat-model.md) made end-to-end encryption look more
+expensive than it is; they have been corrected there, and this is the evidence
+behind those corrections.
 
 ### Where DM plaintext lives
 
@@ -126,12 +127,12 @@ layer is sound; the exposure is entirely below it.
 **There is a second plaintext copy.** `migrations/0005_agent_turn_metric_fts.sql`
 excludes kinds `1059, 30300, 30622, 44100, 44101, 44200` from the tsvector — that
 is gift wraps, DM visibility state, and agent internals. It does **not** exclude
-DM message bodies, which are kind 9 like everything else. `threat-model.md`
-currently claims "DMs are excluded from the search index at the storage layer";
-that's true of the gift-wrap kind, not of DM text. Confidentiality against other
-members still holds — `ChannelScope` in `crates/buzz-search/src/query.rs` scopes
-every FTS query to accessible channels — but for the operator threat there are
-two copies to reason about, not one.
+DM message bodies, which are kind 9 like everything else. Confidentiality against
+other members still holds — `ChannelScope` in `crates/buzz-search/src/query.rs`
+scopes every FTS query to accessible channels — but that is a query-time control,
+not an indexing one, so for the operator threat there are two copies of DM
+plaintext to reason about, not one. (`threat-model.md` previously implied DM text
+was excluded from the index; corrected in place.)
 
 ### The server side of NIP-17 is done
 
