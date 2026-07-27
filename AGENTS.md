@@ -14,27 +14,28 @@ code style, PR process, architecture), see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Ecosystem
 
-Buzz spans five repos. This one (`block/buzz`) is the OSS source for the relay, desktop, mobile, and CLI. The others handle internal builds and deployment:
+rphaf spans two repos and one deployment:
 
 | Repo | Purpose |
 |------|---------|
-| [block/buzz](https://github.com/block/buzz) | OSS source — relay, desktop app, mobile app, CLI, agent harness |
-| [squareup/sprout-releases](https://github.com/squareup/sprout-releases) | Buildkite pipeline producing Block-signed macOS + iOS builds with `-block` version suffix |
-| [squareup/sprout-oss](https://github.com/squareup/sprout-oss) | CI pipeline building the relay Docker image and pushing to internal ECR |
-| [squareup/block-coder-tf-stacks](https://github.com/squareup/block-coder-tf-stacks) | Terraform + ArgoCD deploying the relay to the staging Kubernetes cluster |
-| [squareup/sprout-backend-blox](https://github.com/squareup/sprout-backend-blox) | Desktop backend provider script connecting Blox workstation agents to the relay |
+| [mpimenta8/rphaf](https://github.com/mpimenta8/rphaf) | This repo — our fork. Application code tracks upstream **exactly**; what's ours is the deploy tooling, docs, and identity |
+| [block/buzz](https://github.com/block/buzz) | Upstream source. Configured as the `upstream` remote, **fetch-only** (push disabled) |
 
 ```
-block/buzz (source)
-  ├─► sprout-releases    (desktop + mobile builds → Artifactory, GitHub, Mobile Releases)
-  ├─► sprout-oss         (relay Docker image → ECR)
-  │     └─► block-coder-tf-stacks  (Helm chart → ArgoCD → staging cluster)
-  └─── sprout-backend-blox         (Blox compute provider for Desktop agent launch)
+block/buzz (upstream)
+  └─► mpimenta8/rphaf  ── deploy/compose ──►  our self-hosted relay (AWS)
+                                                   └─► nightly offsite backup (S3, separate account)
 ```
 
-See [RELEASING.md](RELEASING.md) for the desktop release flow and
-[CONTRIBUTING.md § Ecosystem](CONTRIBUTING.md#ecosystem) for contributor
-access information.
+We deliberately run **stock upstream application code** — no app-level fork —
+so `git fetch upstream && git merge upstream/main` stays cheap. Sync often;
+see [MEMORY.md § Syncing upstream](MEMORY.md) for the recipe and its traps.
+
+Block's internal build/deploy repos (Buildkite signing, ECR, ArgoCD, Blox) are
+upstream's, not ours — we don't use them and can't access them.
+
+See [docs/distribution.md](docs/distribution.md) for how builds reach people and
+[CONTRIBUTING.md § Ecosystem](CONTRIBUTING.md#ecosystem) for contributor info.
 
 ---
 
@@ -334,9 +335,9 @@ only the current set remains, otherwise reviewers still see the stale images:
 
 ```bash
 # List screenshot comments to find the stale one's id
-gh pr view <pr> --repo block/buzz --json comments \
+gh pr view <pr> --repo mpimenta8/rphaf --json comments \
   --jq '.comments[] | select(.body | test("pr-<pr>--")) | {id, url}'
-gh api -X DELETE repos/block/buzz/issues/comments/<stale-comment-id>
+gh api -X DELETE repos/mpimenta8/rphaf/issues/comments/<stale-comment-id>
 ```
 
 Branch cleanup when fully done: `git push origin --delete agent-screenshots/<username>`.
