@@ -333,13 +333,8 @@ enterprise-signed builds and infrastructure deployment, and we don't use them.
 See [AGENTS.md § Ecosystem](AGENTS.md#ecosystem) for the full repo table and
 dependency diagram.
 
-**External contributors:** Fork `mpimenta8/rphaf`, open a PR, and CI runs
+**Contributors:** Fork `mpimenta8/rphaf`, open a PR, and CI runs
 automatically. No special access is required.
-
-**Block team members:** See the internal
-[sprout-releases CONTRIBUTING.md](https://github.com/squareup/sprout-releases/blob/main/CONTRIBUTING.md)
-for team access setup, onboarding, and the full repo inventory. See
-[RELEASING.md](RELEASING.md) for the release process.
 
 ---
 
