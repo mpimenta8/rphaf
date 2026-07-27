@@ -128,7 +128,9 @@ data and makes the server look like a different machine to every client.
 
 ## Joining as a user
 
-1. Install the rphaf desktop build.
+1. Install the desktop app — currently upstream's signed build from
+   [block/buzz/releases](https://github.com/block/buzz/releases), since our
+   relay runs stock upstream code. See [`../README.md`](../README.md#get-in).
 2. Point it at `wss://jean.rphaf.io`.
 3. The app generates a fresh keypair, and the relay **rejects it** — that's
    expected, since the roster is closed.
@@ -136,13 +138,35 @@ data and makes the server look like a different machine to every client.
 5. **Back up your `nsec` immediately** — password manager *and* somewhere
    offline. There is no recovery. Lose it and the account is gone.
 
+## Done since first deploy
+
+- **Nightly offsite backups are live** (2026-07-26). `backup.sh` runs at
+  `15 3 * * *` via cron, ships cross-account to `rphaf-backup-bucket` in Matt's
+  own AWS account, and tiers into `daily/` (30d) and `monthly/` (12mo) via
+  bucket lifecycle rules. Log: `/var/log/buzz-backup.log`. Success marker:
+  `/var/backups/buzz/LAST_SUCCESS`. Failures alert by email.
+- **Restore drill passed** (2026-07-26). Restored into a throwaway container:
+  0 errors, 48 events restored against 48 live — exact match. See
+  [`../deploy/compose/PROVISIONING.md`](../deploy/compose/PROVISIONING.md) §7,
+  which is now safe by construction (it used to pipe the dump into the *running*
+  Postgres).
+- **Budgets exist in both accounts** (2026-07-26) — notification-only, so they
+  can't stop anything. See [`../MEMORY.md`](../MEMORY.md) for the scoping notes.
+
 ## Still outstanding
 
-- **Nightly offsite backups** (`backup.sh` → rclone → B2/S3) — the single most
-  important remaining task. Everything on that volume is irreplaceable.
-- **A restore drill.** A backup you haven't restored isn't a backup.
-- **A budget alarm**, so an unexpected cost increase arrives as an alert, not a surprise
-  on someone else's card.
+- **Nothing watches whether the relay is up.** Backup failures alert; a relay
+  that dies at 3am does not. Tolerable for a handful of testers who'll just tell
+  you — not for a real group.
+- **Only part of the two-user surface is exercised.** A second member joined
+  2026-07-27 and channel messaging, typing indicators, and per-user unread all
+  work. Still untested between two people: DMs (NIP-17 gift wraps — a separate
+  path entirely), threaded replies and their materialized counters
+  (`reply_count` / `descendant_count`), reconnect-and-backfill after a client
+  sleeps, and media upload/download. See [`quickstart.md`](quickstart.md).
+- **`add-member` doesn't record provenance** — `added_by` is empty on members
+  added via the admin CLI. Cosmetic at this size; worth fixing before the roster
+  is long enough that "who invited this person" is a real question.
 - **Mobile.** Deferred — the Flutter app has no feature gating yet, so it would
   expose a much larger surface than the desktop build. See
   [`distribution.md`](distribution.md).

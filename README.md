@@ -32,9 +32,14 @@ A chat app we host ourselves. Channels, threads, DMs, search, files — the norm
 stuff — on a relay we control instead of someone else's server.
 
 Buzz underneath is a much larger machine: AI agents as room members, git
-hosting, workflow automation, voice huddles. We've switched all of it off on
-purpose. rphaf is chat first. The rest is still in there, gated behind
-**Settings → Experiments**, waiting until we actually want it.
+hosting, workflow automation, voice huddles. rphaf is chat first — we're not
+using any of that yet, and our own build keeps it out of the way behind
+**Settings → Experiments** rather than deleting it.
+
+That gating is in *this* repo's build, though. The app you're told to install
+below is upstream's, so you'll see the full Buzz surface — agents, repos,
+huddles, all of it. Ignore it; none of it is wired up for us. Treat rphaf as
+channels, threads, DMs, search, and files.
 
 ---
 
@@ -52,20 +57,38 @@ purpose. rphaf is chat first. The rest is still in there, gated behind
 
 ## Get in
 
-> **Not live yet.** The relay isn't deployed. Check the `#rphaf-dev` Slack channel for the latest.
+The relay is live at **`wss://jean.rphaf.io`**. Membership is an explicit list,
+not a signup form, so getting in is: install, get turned away, send your npub,
+get added.
 
-When it is, joining takes three things:
+**1. Install the app.** Grab the latest **Buzz Desktop** release from
+[block/buzz/releases](https://github.com/block/buzz/releases) — the `.dmg` for
+macOS, `.AppImage` or `.deb` for Linux. That's upstream's signed build, and it
+talks to our relay fine; our relay runs stock upstream code. (It still says
+Buzz everywhere. That's expected — see [ROADMAP.md](ROADMAP.md).)
 
-1. **A build.** The desktop app, built from this repo — our version, with the
-   non-chat features already switched off.
-2. **The relay address.** The app points at `ws://localhost:3000` out of the
-   box; you'll change it to ours.
-3. **An invite.** The relay is closed on purpose — membership is an explicit
-   list, not a signup form. Post your npub in `#rphaf-dev` and you get added.
+**2. Point it at the relay.** When it asks for a community, enter
+`wss://jean.rphaf.io`.
 
-The app makes you a fresh identity on first launch. Back up the key it gives
-you. Losing it means losing the account, and there's no reset email — that's
-the deal with running your own thing.
+**3. Get turned away.** This part looks like a failure and isn't. The app mints
+you a fresh identity on first launch, the relay has never heard of it, and you
+land on a screen headed **"Not a member yet"**. That's the system working.
+
+**4. Send your npub.** That screen shows your public key with a copy button.
+Send it to Matt. It's public — safe to paste anywhere.
+
+**5. Hit "Try again".** Once you've been added, the same screen's button lets
+you straight in. No reinstall.
+
+> **Back up your key.** Settings → Profile reveals your `nsec` — the private
+> half. Put it in a password manager. There is no reset email and no recovery:
+> lose it and the account is gone. That's the deal with running your own thing.
+
+If you already have a Nostr identity you'd rather use, the denial screen also
+takes an existing `nsec` instead of the one the app generated.
+
+Testing for us? **[docs/quickstart.md](docs/quickstart.md)** has the same steps
+plus what's still unproven and worth poking at.
 
 ---
 
@@ -105,7 +128,8 @@ Before you push anything: `just ci`.
 The rebrand is tiered — cosmetic strings are cheap, renaming 1,200 files of
 crates and env vars is not. The agents, git hosting, and voice huddles are
 gated off rather than deleted, so folding them back in is a toggle and a
-process, not a re-fork. The relay still needs deploying.
+process, not a re-fork. The relay is deployed and backed up nightly; mobile
+isn't gated yet, so it's desktop-only for now.
 
 Details, and why tier 3 is probably never worth it: **[ROADMAP.md](ROADMAP.md)**.
 
