@@ -124,27 +124,6 @@ export function buildTeamMentionCandidates(
   });
 }
 
-/**
- * Assemble the @-mention suggestion pool. When agents are disabled ("just
- * chat" builds), agent/persona identities and agent teams are dropped so bots
- * never surface in autocomplete; otherwise team mentions are appended.
- */
-export function buildMentionSuggestionPool(params: {
-  agentsEnabled: boolean;
-  candidates: MentionCandidate[];
-  personas: AgentPersona[];
-  teams: readonly AgentTeam[];
-}): MentionCandidate[] {
-  const { agentsEnabled, candidates, personas, teams } = params;
-  if (!agentsEnabled) {
-    return candidates.filter((candidate) => candidate.isAgent !== true);
-  }
-  return [
-    ...candidates,
-    ...buildTeamMentionCandidates(teams, personas, candidates),
-  ];
-}
-
 export function formatTeamMention(
   teamName: string,
   members: readonly TeamMentionMember[],

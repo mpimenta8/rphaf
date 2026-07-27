@@ -64,7 +64,6 @@ import {
   isSettingsSection,
 } from "@/features/settings/ui/SettingsPanels";
 import { HuddleBar, HuddleProvider } from "@/features/huddle";
-import { FeatureGate } from "@/shared/features";
 import { useDueReminderBadgeCount } from "@/features/reminders/hooks";
 import { RemindMeLaterProvider } from "@/features/reminders/ui/RemindMeLaterProvider";
 import { useReminderNotifications } from "@/features/reminders/useReminderNotifications";
@@ -973,20 +972,18 @@ export function AppShell() {
                   </SidebarProvider>
                 </div>
 
-                <FeatureGate feature="huddle">
-                  <div className="absolute inset-x-0 bottom-0 z-0 h-(--buzz-huddle-drawer-height)">
-                    <HuddleBar
-                      className="h-full"
-                      onOpenThread={(channelId, messageId) => {
-                        void goChannel(channelId, {
-                          messageId,
-                          threadRootId: messageId,
-                        });
-                      }}
-                      onVisibilityChange={setIsHuddleDrawerOpen}
-                    />
-                  </div>
-                </FeatureGate>
+                <div className="absolute inset-x-0 bottom-0 z-0 h-(--buzz-huddle-drawer-height)">
+                  <HuddleBar
+                    className="h-full"
+                    onOpenThread={(channelId, messageId) => {
+                      void goChannel(channelId, {
+                        messageId,
+                        threadRootId: messageId,
+                      });
+                    }}
+                    onVisibilityChange={setIsHuddleDrawerOpen}
+                  />
+                </div>
               </div>
             </RemindMeLaterProvider>
           </HuddleProvider>

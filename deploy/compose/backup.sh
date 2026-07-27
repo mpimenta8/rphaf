@@ -18,6 +18,13 @@
 #   BACKUP_RCLONE_REMOTE  rclone remote:path offsite  (default empty = local only)
 #   BACKUP_ALERT_CMD      command run on failure      (default empty = no alerting)
 #                         Invoked as: $BACKUP_ALERT_CMD "<message>"
+#                         QUOTE THE WHOLE VALUE in backup.env, or the shell reads
+#                         `BACKUP_ALERT_CMD=aws sns publish …` as an assignment
+#                         prefix and tries to run `sns` instead of setting the var.
+#                         NO ARGUMENT MAY CONTAIN SPACES: expansion below is
+#                         deliberately unquoted so the command word-splits, and
+#                         quotes inside the value are not re-parsed as quotes.
+#                         Need a spaced argument? Point this at a wrapper script.
 #
 # KEEP_DAYS prunes only the LOCAL copies. Nothing here ever deletes anything
 # offsite — that is deliberate, so a compromised relay host cannot destroy

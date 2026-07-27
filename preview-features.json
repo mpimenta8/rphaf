@@ -40,38 +40,6 @@
       "platforms": [
         "desktop"
       ]
-    },
-    {
-      "id": "agents",
-      "name": "Agents",
-      "description": "Managed AI agents: agent nav, agent screens, in-channel bots, and agent activity",
-      "platforms": [
-        "desktop"
-      ]
-    },
-    {
-      "id": "huddle",
-      "name": "Huddles",
-      "description": "Live voice/video huddle calls in channels and DMs",
-      "platforms": [
-        "desktop"
-      ]
-    },
-    {
-      "id": "mesh-compute",
-      "name": "Mesh compute",
-      "description": "Distributed mesh compute settings and participation",
-      "platforms": [
-        "desktop"
-      ]
-    },
-    {
-      "id": "agent-memory",
-      "name": "Agent memory",
-      "description": "Persistent memory store for managed agents",
-      "platforms": [
-        "desktop"
-      ]
     }
   ]
 }
