@@ -4,7 +4,7 @@ Steps to stand up the rphaf/Buzz relay on a fresh **Ubuntu 24.04 LTS or newer** 
 install Docker, open the firewall, deploy, and wire nightly offsite backups.
 
 **Written for AWS EC2**, which is what the relay actually runs on: a `t4g.medium` in `us-east-1`,
-in a friend's personal account funded by his credits. §3 onward is provider-agnostic and was
+in a friend's personal account. §3 onward is provider-agnostic and was
 originally proven on DigitalOcean; §1–§2 are AWS-specific and call out the DO equivalents where they
 differ. Assumes the `rphaf.io` domain and that you've settled your **owner key** (see `PLANNING.md`
 Part 1 — note `PLANNING.md` itself still recommends DigitalOcean and is pending the same update).
@@ -112,8 +112,8 @@ EC2 → **Launch instance**:
     can't complete its ACME challenge and you'll spend an hour debugging a firewall you forgot
     existed.
 - **`t4g` is burstable** (CPU credits, "unlimited" mode on by default). Irrelevant for an idle chat
-  relay, but it's where a surprise CPU bill would come from — set a billing alarm regardless, so
-  credits running out arrives as an alert and not an invoice.
+  relay, but it's where a surprise CPU bill would come from — set a budget alarm regardless (§6i),
+  especially if the account belongs to someone else.
 
 Then **allocate and associate an Elastic IP** (EC2 → Elastic IPs → Allocate → Associate):
 
@@ -388,10 +388,10 @@ Offsite is **Amazon S3**, in a **different AWS account from the relay**. Three d
 | Decision | Why |
 |---|---|
 | S3, not Backblaze/other | `backup.sh` ships a **full** backup nightly, not an incremental. EC2 → S3 **in the same region is free**; anywhere else is metered egress that grows with your media volume. |
-| A **separate AWS account** you own | The relay runs in a friend's personal account on **expiring credits**. Same-account backups die with that account — suspension, closure, or a falling-out takes the relay *and* its only copy at once. Backups are the one thing that must outlive the host account. |
+| A **separate AWS account** you own | The relay runs in a friend's personal account. Same-account backups die with that account — closure, a billing lapse, a falling-out, or him simply moving on takes the relay *and* its only copy at once. Backups are the one thing that must outlive the host account, however it's funded. |
 | Instance role, **no stored key** | The alternative is a long-lived access key sitting in `backup.env` on an internet-facing host. An EC2 instance role gives S3 access with zero stored credentials, rotated by AWS. |
 
-Cost is ~$1–2/month at this scale — not covered by the friend's credits, and deliberately so.
+Cost is ~$1–2/month at this scale, on your own card — deliberately, since that's the point.
 
 > **Region matters.** The bucket **must** be in the relay's region (`us-east-1`). Same-region
 > transfer is free *even across accounts*; a bucket elsewhere silently puts every nightly full
@@ -702,21 +702,91 @@ goes to `monthly/`, so without this the path that runs 30 nights out of 31 stays
 
 ### g. Alert on failure
 
-`backup.sh` supports an optional `BACKUP_ALERT_CMD`, run only when a backup fails. The cheapest
-useful target is the same **SNS topic** you'll use for the billing alarm — one topic, one email
-subscription, both classes of "you need to know this" arriving the same way.
+`backup.sh` supports an optional `BACKUP_ALERT_CMD`, run only when a backup fails. Until it's set,
+**a failed backup tells nobody** — the alerting path exists but is dormant. Target an **SNS topic**
+in the relay's account. Do these in order; the last step doesn't work without the first three.
 
-Create the topic once (in the relay's account), subscribe your email, confirm the subscription mail,
-then add `sns:Publish` for that topic ARN to the `rphaf-relay-backup` role from §6b and:
+**1. Create the topic** — SNS → Topics → Create topic → type **Standard**, name `rphaf-alerts`.
 
-```bash
-# append to backup.env
-BACKUP_ALERT_CMD=aws sns publish --region us-east-1 --topic-arn arn:aws:sns:us-east-1:<RELAY_ACCOUNT_ID>:rphaf-alerts --subject "rphaf backup FAILED" --message
+**2. Subscribe your email** — on that topic → Create subscription → Protocol **Email** → your
+address. **Then open the confirmation mail and click the link.** AWS silently discards messages to
+unconfirmed subscriptions, so skipping this leaves you with alerting that looks configured and
+delivers nothing.
+
+**3. Let the role publish** — IAM → Roles → `rphaf-relay-backup` → its inline policy → add:
+
+```json
+{ "Effect": "Allow", "Action": "sns:Publish",
+  "Resource": "arn:aws:sns:us-east-1:<RELAY_ACCOUNT_ID>:rphaf-alerts" }
 ```
 
-Requires the AWS CLI on the VM (`sudo snap install aws-cli --classic`). If you'd rather not install
-it, any command taking a message as its final argument works — a [healthchecks.io](https://healthchecks.io)
-`curl` is a fine substitute.
+**4. On the VM, install the CLI and let it resolve the account ID** (this also re-confirms the
+instance role works):
+
+```bash
+sudo snap install aws-cli --classic
+aws sts get-caller-identity --query Account --output text
+```
+
+**5. Append the setting to `backup.env`.**
+
+> ⚠️ **This is a config line, not a command.** Typing it at the shell makes bash read
+> `<RELAY_ACCOUNT_ID>` as an input redirect and fail with `No such file or directory`. Use the
+> heredoc — note `>>` (append, don't clobber) and the *unquoted* `EOF` so `${ACCT}` expands:
+
+```bash
+cd /opt/rphaf/deploy/compose
+ACCT=$(aws sts get-caller-identity --query Account --output text)
+cat >> backup.env <<EOF
+BACKUP_ALERT_CMD="aws sns publish --region us-east-1 --topic-arn arn:aws:sns:us-east-1:${ACCT}:rphaf-alerts --subject rphaf-backup-FAILED --message"
+EOF
+cat backup.env      # confirm the ARN has a real 12-digit account, not a placeholder
+```
+
+> **Two things about that value are load-bearing.**
+>
+> **It must be quoted.** Unquoted, `BACKUP_ALERT_CMD=aws sns publish …` is shell syntax for *"run
+> `sns publish …` with `BACKUP_ALERT_CMD=aws` set for that one command"* — so sourcing the file
+> fails with `Command 'sns' not found` and the variable never gets set at all.
+>
+> **No argument inside it may contain spaces.** `backup.sh` runs `$ALERT_CMD "$msg"` unquoted so the
+> command word-splits, and quotes *within* a variable's value are not re-interpreted as quotes after
+> expansion — `--subject "rphaf backup FAILED"` would arrive as four arguments carrying literal
+> quote characters. Hence the hyphenated subject. It costs nothing: `backup.sh` already prefixes the
+> message with `rphaf backup FAILED on <host>:`. If you ever need spaces in an argument, put the
+> command in a wrapper script and point `BACKUP_ALERT_CMD` at that instead.
+
+**6. Prove it delivers**, rather than waiting for a genuine failure to find out:
+
+```bash
+set -a; . ./backup.env; set +a
+echo "$BACKUP_ALERT_CMD"      # must print the whole command — if it prints "aws", it wasn't quoted
+$BACKUP_ALERT_CMD "test alert - rphaf alerting setup, ignore"
+```
+
+An email should arrive shortly — but **give it several minutes before concluding anything is
+broken.** Gmail in particular will sit on SNS mail and then deliver a batch at once (observed
+2026-07-26: two test alerts arrived together, minutes after the second was sent). Don't start
+changing configuration during that window; you'll "fix" a system that was already working.
+
+> **A returned `MessageId` proves acceptance, not delivery.** SNS accepts the publish and returns an
+> ID even when the only subscription is unconfirmed — it then silently discards the message. So a
+> successful-looking test is exactly what a broken setup produces.
+
+Nothing arriving means the subscription is unconfirmed (step 2) or, less likely given the publish
+succeeded, the role lacks `sns:Publish` (step 3). **Check the status in the console**, not from the
+VM: SNS → Topics → `rphaf-alerts` → **Subscriptions** tab → **Status** column. The role deliberately
+has only `sns:Publish`, so `aws sns list-subscriptions-by-topic` and `aws sns subscribe` both fail
+with `AuthorizationError` from the relay host — that's least privilege working, not a
+misconfiguration. Don't widen the role for a one-off diagnostic.
+
+If it shows **Pending confirmation**, select the subscription → **Request confirmation** to resend,
+and check spam for mail from `no-reply@sns.amazonaws.com`.
+
+> **Prefer no AWS CLI?** Any command taking the message as its final argument works — a
+> [healthchecks.io](https://healthchecks.io) `curl` is a fine substitute, and has the advantage of
+> being a *dead man's switch*: it alerts when an expected ping fails to arrive, which catches a run
+> that never happened at all. `BACKUP_ALERT_CMD` fires only on failure, so it can't.
 
 ### h. Notice the failures alerting can't see
 
@@ -733,6 +803,57 @@ The first is worth automating: an S3 **CloudWatch alarm** on the bucket's `PutRe
 alerting to the same SNS topic when it drops to zero over 48 hours, catches "the backups quietly
 stopped" without any code on the VM. Everything else on this page fails loudly; that one fails
 silently, which is why it deserves the alarm.
+
+### i. Budget alarms (both accounts)
+
+Two accounts carry cost risk, for different reasons:
+
+| Account | Risk | Threshold |
+|---|---|---|
+| **The relay's** (friend's) | **It's someone else's money.** Running in a friend's account means an unnoticed cost increase quietly eats budget he set aside for his own use — the alarm is as much courtesy as protection. `t4g` is burstable, so CPU overage lands here. | ~$10/mo |
+| **Yours** (backups) | Runaway storage. Full backups × retention scales multiplicatively, so growing media quietly grows the bill. | ~$5/mo |
+
+**Use AWS Budgets, not a CloudWatch billing alarm.** CloudWatch's billing metric first requires
+enabling *Receive Billing Alerts* in Billing preferences, which is **root-only** — and in the
+relay's account you're an IAM user, so you'd be blocked. Budgets needs no such preference, emails
+you directly without an SNS topic, and can alert on **forecasted** spend, which warns you before the
+money is gone instead of after.
+
+In each account: **Billing and Cost Management → Budgets → Create budget**
+
+- Template **Monthly cost budget**, amount from the table above
+- Alert at **85% of actual** *and* **100% of forecasted** — the forecast alert is the one that gives
+  you warning rather than a post-mortem
+- Recipient: your email
+
+> Check **Billing → Budgets** loads in the relay's account before planning around it. An IAM user
+> often has no billing permissions, in which case the account owner either grants them or creates
+> the budget themselves.
+
+**Budgets cannot break anything.** They are notification-only: they watch spend and email you. The
+opt-in **budget actions** feature *can* stop instances or attach restrictive IAM policies, but you
+must configure it deliberately. Leave it alone and the budget is inert monitoring — safe to create
+in someone else's account.
+
+**Scoping in an account you don't own.** An unfiltered budget tracks **total account spend**, so in
+a shared account it alerts on the owner's unrelated costs and gives you incidental visibility into
+their bill. Scope it via Budget scope → *Filter specific AWS cost dimensions* → **Tag**, matching
+the relay's `Name = rphaf-relay`.
+
+> **The tag won't appear in the filter list until it's activated as a cost allocation tag**
+> (Billing → Cost allocation tags) — which needs **billing-console access**, so an IAM user in
+> someone else's account can't do it. Ask the owner. Allow up to 24 hours for it to become
+> filterable, and expect it to apply **going forward** rather than retroactively.
+>
+> Until then, leave the budget **account-wide and tell the account owner it exists** rather than
+> reaching for a `Service = EC2` filter — that scopes wrongly in both directions, missing the
+> relay's S3/EBS/data-transfer costs while still catching any EC2 the owner runs.
+
+> **If the account is ever credit-funded, mind the Credits toggle.** With promotional credits
+> applied (the default), net cost sits near $0 while they last, so the budget stays silent and only
+> speaks once they're exhausted — accurate, but no advance warning. Unchecking **Credits** under
+> Advanced options shows the true gross run rate instead. Not applicable to our accounts, which are
+> funded with ordinary money, so gross and net match and the default reports real spend from day one.
 
 ## 7. Restore drill (a backup you haven't restored isn't a backup)
 

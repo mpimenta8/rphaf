@@ -111,6 +111,10 @@ To **re-enable agents later:** flip the Experiments toggles ON, then run the age
 - **No shell script is linted anywhere** — no shellcheck in the Justfile, lefthook, or the
   workflows, and `just ci` never runs `scripts/dev-setup.sh`. Changes to shell scripts need
   hand-verification (`bash -n`, then actually run the changed lines); CI will not catch them.
+  - **Verify under `bash`, not the macOS prompt.** The local shell is **zsh**, which does *not*
+    word-split unquoted expansions, while our scripts are `#!/usr/bin/env bash` on Linux, which
+    does. Testing `$VAR arg` behaviour at a zsh prompt gives the wrong answer — wrap it in
+    `bash <<'EOF' … EOF` (seen 2026-07-26 while proving `BACKUP_ALERT_CMD` splitting).
 
 - **Hiding UI ≠ deleting data.** The seeded dev community ships a real `@Fizz` agent *member* on the
   relay; feature gates hide agent UI but can't remove identities already in the event log. A fresh
@@ -178,12 +182,23 @@ value warrants it — it's a one-line `DATABASE_URL` swap, not a rebuild.
   grey-cloud/proxy caveat doesn't apply. Request a plain A record. **IPv4 only at first:** Let's
   Encrypt prefers IPv6 when an AAAA record exists, so an unverified IPv6 path fails cert issuance
   while everything looks healthy over IPv4.
-- **⚠️ HOST CHANGED 2026-07-25 (late): moving to AWS EC2, in a friend's *personal* account.** He has
-  a pile of **AWS credits to burn**, wants hands-on AWS practice, and Matt gets day-job value from
-  the same — plus it consolidates with Route 53, which already hosts `rphaf.io`. Credits were the
-  explicit tipping point: without them AWS costs *more* than DO (metered egress vs DO's included
-  4 TB) and the call was the other way. Ownership/admin dilution is a **non-issue** here: 15+ year
-  friendship, former roommates.
+- **⚠️ HOST CHANGED 2026-07-25 (late): moving to AWS EC2, in a friend's *personal* account.** He
+  wants hands-on AWS practice, Matt gets day-job value from the same, and it consolidates with
+  Route 53, which already hosts `rphaf.io`. Ownership/admin dilution is a **non-issue** here: 15+
+  year friendship, former roommates.
+  - **⚠️ CORRECTED 2026-07-26: there are no expiring credits.** The friend has an **AWS budget set
+    aside with plenty of headroom** — ordinary money he's chosen to spend, not a promotional balance
+    with a cliff. Earlier notes said "credits to burn" and called them "the explicit tipping point"
+    over DigitalOcean; **that was wrong**, and several decisions were written on top of it.
+  - **What this actually changes:** the raw cost comparison. Without credits AWS runs ~$34/mo vs
+    DO's $32 (metered egress vs DO's included 4 TB), so AWS is *slightly more expensive*, not free.
+    The move still stands on its other merits — Route 53 consolidation, the AWS practice both of
+    them wanted, and the relay already being live and verified there. **Not worth reversing**, but
+    don't repeat "credits made it cheaper" — it didn't.
+  - **What it does NOT change:** backups still live in **Matt's own account** (see §6) — that rested
+    on not depending on an account he doesn't control, which is true regardless of how it's funded.
+    And the billing alarm is still worth having, just for a different reason: it's **someone else's
+    money**, so the alarm is about not silently eating his headroom rather than warning of a cliff.
   **Live as of 2026-07-25:** instance `rphaf-relay`, `t4g.medium` (ARM Graviton, 2 vCPU / 4 GB),
   **Ubuntu 26.04 LTS** (the AMI default has moved past 24.04 — docs should say "24.04 LTS or newer"
   rather than pinning), 120 GB `gp3` **encrypted** with the default `aws/ebs` key, `us-east-1`.
@@ -214,7 +229,7 @@ value warrants it — it's a one-line `DATABASE_URL` swap, not a rebuild.
     `docker-compose-v2` packages.
   - `t4g` is **burstable** (CPU credits, "unlimited" mode on by default) — irrelevant for an idle
     chat relay, but it's where surprise CPU charges would come from. Set a **billing alarm anyway**,
-    so credits running out arrives as an alert rather than an invoice.
+    so unexpected cost arrives as an alert rather than an invoice — on someone else's card.
 - **The DO droplet stays alive until the relay is verified on EC2**, then gets cancelled before the
   next billing date — it's the rollback. For reference it was `rphaf-ubuntu-nyc3`, NYC3, Ubuntu
   24.04, IPv4 `68.183.145.188`, $32/mo, and it reached: `buzz` user (sudo, key-only SSH),
@@ -415,13 +430,14 @@ backup** — do the restore drill once (see `PROVISIONING.md` §7).
 `PROVISIONING.md` §6. Backblaze B2 was considered and rejected. The reasoning, so nobody reopens it:
 - **S3 over B2 — because of egress, not credits.** `backup.sh` ships a **full** backup nightly (fresh
   timestamped prefix, never incremental). EC2 → S3 **same-region is free**; any other provider meters
-  that egress and the bill grows with the media volume. At ~$1–2/mo the credits argument that drove
-  the relay to AWS is *irrelevant* here — this was decided on egress and credential handling.
+  that egress and the bill grows with the media volume. At ~$1–2/mo, funding is irrelevant either
+  way — this was decided on egress and credential handling.
 - **A separate account from the relay — this is the important half.** The relay lives in a friend's
-  personal account on **expiring credits**; `docs/threat-model.md` notes credits running out arrives
-  as an outage, not a warning. Same-account backups die with that account (suspension, closure,
-  falling-out) — the exact failure offsite backups exist to survive. Ownership dilution is a non-issue
-  for the relay (MEMORY says so above) but backups are the exception: they must outlive it.
+  personal account. Same-account backups die with that account (closure, a billing lapse, a
+  falling-out, or him simply moving on in five years) — the exact failure offsite backups exist to
+  survive. Ownership dilution is a non-issue for the relay (see above) but backups are the
+  exception: they must outlive it. **This argument never depended on how the account is funded**,
+  so the 2026-07-26 credits correction leaves it intact.
 - **Instance role, no stored key.** rclone `env_auth = true` reads EC2 instance metadata, so **no
   credential is ever written to the relay host** — strictly better than B2's keyID/applicationKey in
   `backup.env`. Cross-account needs **both** the role's identity policy *and* the bucket policy;
@@ -506,10 +522,53 @@ so the branch that runs 30 nights in 31 is exercised, not just the monthly path.
 is `15 3 * * *` (03:15 UTC); log at `/var/log/buzz-backup.log`; marker at
 `/var/backups/buzz/LAST_SUCCESS`. Every code path in `backup.sh` has now run for real.
 
-**⚠️ The VM must be on this branch's `backup.sh`.** `main`'s version writes to `relay/<TS>/` with no
-tier, matching **neither** lifecycle rule — nothing would ever expire and there'd be no monthly
-tail. The VM is currently checked out on `offsite-backups-and-restore-drill`; **return it to `main`
-once that PR merges** (`git checkout main && git pull`).
+**✅ PR #5 merged (`72f6b0ee7`); the VM is back on `main` with the tiering.** Near-miss worth
+remembering: `git checkout main` **without** `git pull` left the VM on pre-merge `main`, whose
+`backup.sh` writes to `relay/<TS>/` — matching **neither** lifecycle rule, so nothing would ever
+expire and there'd be no monthly tail. Caught only because
+`grep -c 'TIER' deploy/compose/backup.sh` returned **0**. **After any VM checkout, run that grep;
+it must be > 0** before the next 03:15 run.
+
+**✅ Budgets created in BOTH accounts (2026-07-26).** Own account: $5/mo, properly scoped (it's all
+ours). Relay account: $10/mo but **account-wide, not scoped to the relay** — the `Name=rphaf-relay`
+tag can't be used as a filter until it's activated as a **cost allocation tag**, which needs
+billing-console access the IAM user doesn't have. **Open action: ask the friend to activate it**
+(then re-scope; allow 24h, and it applies forward rather than retroactively), and **tell him the
+budget exists** since account-wide means it counts his other spend and shows Matt his total bill.
+Deliberately *not* using a `Service = EC2` filter as a stopgap — it scopes wrongly both ways
+(misses the relay's S3/EBS/transfer, still catches his EC2).
+- **Budgets are notification-only and cannot break anything** — safe to create in someone else's
+  account. Only the opt-in *budget actions* feature can stop instances or attach IAM policies, and
+  that must be configured deliberately.
+- The **Credits** toggle (Advanced options) is moot here — **there are no credits**, so gross and
+  net are the same number and the budget reports real spend from day one. Keep the setting in mind
+  only if a promotional balance is ever applied.
+
+**Billing alarms: use AWS Budgets, not a CloudWatch billing alarm** (decided 2026-07-26, documented
+as §6i, branch `backup-alerting-and-billing-alarm`). CloudWatch's billing metric requires enabling
+*Receive Billing Alerts* in Billing preferences first, which is **root-only** — and our access to
+the relay account is an IAM user, so that route is blocked there. Budgets needs no preference, mails
+you directly without an SNS topic, and alerts on **forecast** as well as actual, which warns before
+the month runs away rather than after. Thresholds: **~$10** relay account (it's the friend's money;
+burstable `t4g` CPU is where a surprise would come from), **~$5** own account (backup storage).
+Alert at 85% actual + 100% forecast.
+**✅ §6g alerting is LIVE and verified (2026-07-26)** — SNS topic `rphaf-alerts` in the relay
+account, email subscription confirmed, `sns:Publish` added to the `rphaf-relay-backup` role, and a
+test publish actually reached the inbox. A failed backup now tells someone.
+- **`BACKUP_ALERT_CMD` must be quoted in `backup.env`, with no spaces inside any argument.**
+  Unquoted, `BACKUP_ALERT_CMD=aws sns publish …` is an *assignment prefix* — bash runs `sns` and
+  never sets the variable (`Command 'sns' not found`). And since `backup.sh` expands it unquoted so
+  it word-splits, quotes *within* the value aren't re-parsed: `--subject "rphaf backup FAILED"`
+  arrives as 4 args with literal quotes. Hence `--subject rphaf-backup-FAILED`. Both constraints are
+  in `backup.sh`'s header now.
+- **A returned `MessageId` proves acceptance, not delivery** — SNS accepts and silently discards to
+  an unconfirmed subscription. Check status in the **console** (SNS → Topics → Subscriptions); the
+  role holds only `sns:Publish`, so `list-subscriptions-by-topic`/`subscribe` correctly fail from
+  the VM. Don't widen the role for a diagnostic.
+- **Gmail batches SNS mail** — two test alerts arrived together, minutes late. Wait before
+  concluding it's broken; the setup was fine the whole time.
+- Still true: `BACKUP_ALERT_CMD` fires only on *failure* and can never catch a run that **never
+  happened** — see §6h (`LAST_SUCCESS`, or a CloudWatch alarm on the bucket's `PutRequests`).
 
 **AWS access model (as of 2026-07-26) — read before attempting §6.**
 - Matt's access to the relay's account is an **IAM user the friend created**, not root and not his

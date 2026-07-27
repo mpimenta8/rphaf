@@ -86,11 +86,11 @@ Approximate `us-east-1`, on-demand:
 | 120 GB `gp3` | ~$9.60 |
 | Elastic IP | $0 while attached |
 | Egress | 100 GB free, then ~$0.09/GB |
-| **Total** | **~$34** before credits |
+| **Total** | **~$34/mo** |
 
 **Egress is the variable to watch.** Chat text is negligible; **media** —
-images and video through MinIO — is what scales. Worth a billing alarm, which
-also tells you when credits run out.
+images and video through MinIO — is what scales past the 100 GB free tier.
+Worth a budget alarm, especially since the account belongs to a friend.
 
 ## Security posture
 
@@ -141,7 +141,8 @@ data and makes the server look like a different machine to every client.
 - **Nightly offsite backups** (`backup.sh` → rclone → B2/S3) — the single most
   important remaining task. Everything on that volume is irreplaceable.
 - **A restore drill.** A backup you haven't restored isn't a backup.
-- **A billing alarm**, so credits running out arrives as an alert not a surprise.
+- **A budget alarm**, so an unexpected cost increase arrives as an alert, not a surprise
+  on someone else's card.
 - **Mobile.** Deferred — the Flutter app has no feature gating yet, so it would
   expose a much larger surface than the desktop build. See
   [`distribution.md`](distribution.md).
