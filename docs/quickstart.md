@@ -8,7 +8,7 @@ on a relay we own rather than someone else's server. It's a fork of
 [Buzz](https://github.com/block/buzz) by [Block, Inc.](https://block.xyz), and
 all of the hard parts are theirs.
 
-Relay: `**wss://jean.rphaf.io**`
+Relay: **`wss://jean.rphaf.io`**
 
 ---
 
